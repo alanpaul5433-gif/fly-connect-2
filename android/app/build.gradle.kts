@@ -16,6 +16,13 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
+// Detect whether a release artifact is actually being assembled so we can refuse
+// to debug-sign it (Play rejects debug-signed uploads). `flutter run` / debug builds
+// are unaffected. Pass -PallowInsecureRelease=true to debug-sign a release on purpose
+// for local testing only.
+val isAssemblingRelease = gradle.startParameter.taskNames.any { it.contains("Release") }
+val allowInsecureRelease = (project.findProperty("allowInsecureRelease") as String?) == "true"
+
 android {
     namespace = "com.appcurb.flyconnect"
     compileSdk = 36
@@ -33,7 +40,7 @@ android {
     defaultConfig {
         applicationId = "com.appcurb.flyconnect"
         minSdk = flutter.minSdkVersion            // Firebase Auth requires 23+
-        targetSdk = 34         // Google Play 2026 requirement
+        targetSdk = 35         // Google Play requires API 35 for new uploads (since Aug 2025)
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
@@ -51,11 +58,22 @@ android {
 
     buildTypes {
         release {
-            // Use release signing if key.properties is present; fall back to debug so
-            // local `flutter run --release` works without the keystore.
+            // Use release signing if key.properties is present. If it's missing AND a
+            // release artifact is being assembled, FAIL rather than silently debug-sign
+            // (Play rejects debug-signed bundles). Debug builds / `flutter run` still work.
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
+                if (isAssemblingRelease && !allowInsecureRelease) {
+                    throw GradleException(
+                        "Release build requested but android/key.properties is missing.\n" +
+                        "Production AABs must be signed with the upload keystore — a debug-signed " +
+                        "bundle will be rejected by Google Play.\n" +
+                        "Fix: add key.properties (see docs/keystore-setup.md) or build via CI " +
+                        "(which injects the keystore secret).\n" +
+                        "To debug-sign a release for LOCAL testing only, pass -PallowInsecureRelease=true."
+                    )
+                }
                 signingConfigs.getByName("debug")
             }
             isMinifyEnabled = false

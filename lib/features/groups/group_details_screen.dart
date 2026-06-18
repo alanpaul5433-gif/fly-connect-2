@@ -125,19 +125,7 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
               ));
             },
           ),
-          ListTile(
-            leading:
-                const Icon(Icons.notifications_off_outlined, color: Colors.grey),
-            title: const Text('Mute group'),
-            subtitle: const Text('Coming soon', style: TextStyle(fontSize: 11)),
-            onTap: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Muting is not yet available in this build.'),
-                duration: Duration(seconds: 2),
-              ));
-            },
-          ),
+          // Mute group hidden for v1.0 — not yet implemented.
           ListTile(
             leading: const Icon(Icons.flag_outlined, color: Colors.red),
             title:

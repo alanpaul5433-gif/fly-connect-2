@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_routes.dart';
 import '../../shared/widgets/confirm_dialog.dart';
@@ -65,10 +66,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => context.push(AppRoutes.editProfileDetails)),
           _Tile(icon: Icons.lock_outline, label: 'Change Password',
             onTap: () => _changePasswordSheet(context)),
-          _Tile(icon: Icons.phone_outlined, label: 'Phone Number',
-            onTap: () => _showInfoSheet(context, 'Update Phone', 'Coming soon')),
-          _Tile(icon: Icons.email_outlined, label: 'Email Address',
-            onTap: () => _showInfoSheet(context, 'Update Email', 'Coming soon')),
+          // Phone/email update tiles hidden for v1.0 — not yet implemented.
+          // Re-add here once the update flows exist.
         ]),
         _Section(title: 'Notifications', children: [
           _ToggleTile(icon: Icons.favorite_outline, label: 'Likes', value: _pushLikes,
@@ -111,13 +110,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _Tile(icon: Icons.help_outline, label: 'Help & Support',
             onTap: () => _showInfoSheet(context, 'Help & Support', 'Contact: support@flyconnect.app')),
           _Tile(icon: Icons.description_outlined, label: 'Terms of Service',
-            onTap: () => _showInfoSheet(context, 'Terms of Service', 'View our terms at flyconnect.app/terms')),
+            onTap: () => _openUrl('https://flyconnect.app/terms')),
           _Tile(icon: Icons.privacy_tip_outlined, label: 'Privacy Policy',
-            onTap: () => _showInfoSheet(context, 'Privacy Policy', 'View at flyconnect.app/privacy')),
+            onTap: () => _openUrl('https://flyconnect.app/privacy')),
           _Tile(icon: Icons.info_outline, label: 'App Version',
             trailing: Text(_appVersion.isEmpty ? '…' : _appVersion,
-                style: const TextStyle(color: Colors.grey, fontSize: 13)),
-            onTap: () {}),
+                style: const TextStyle(color: Colors.grey, fontSize: 13))),
         ]),
         Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 8), child: OutlinedButton.icon(
           icon: const Icon(Icons.delete_outline, color: Colors.red),
@@ -392,6 +390,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ])));
   }
 
+  /// Opens an external URL (Terms / Privacy) in the browser. Shows a SnackBar
+  /// if the link can't be opened so the action never silently no-ops.
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    final ok = await canLaunchUrl(uri) &&
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open $url')));
+    }
+  }
+
   void _deleteAccountSheet(BuildContext context) {
     final confirmCtrl = TextEditingController();
     bool isDeleting = false;
@@ -547,13 +557,16 @@ class _Section extends StatelessWidget {
 }
 
 class _Tile extends StatelessWidget {
-  final IconData icon; final String label; final VoidCallback onTap; final Widget? trailing;
-  const _Tile({required this.icon, required this.label, required this.onTap, this.trailing});
+  final IconData icon; final String label; final VoidCallback? onTap; final Widget? trailing;
+  const _Tile({required this.icon, required this.label, this.onTap, this.trailing});
   @override
   Widget build(BuildContext context) => ListTile(
     leading: Icon(icon, size: 22, color: AppColors.textPrimary),
     title: Text(label, style: const TextStyle(fontSize: 15)),
-    trailing: trailing ?? const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
+    // Only show the chevron affordance when the tile is actually tappable.
+    trailing: trailing ?? (onTap != null
+        ? const Icon(Icons.chevron_right, color: Colors.grey, size: 20)
+        : null),
     onTap: onTap,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(16))));
 }

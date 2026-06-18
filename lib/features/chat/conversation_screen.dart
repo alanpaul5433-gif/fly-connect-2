@@ -28,6 +28,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
     context.read<ChatProvider>().markAsRead(widget.chatId);
   }
 
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
   void _send() async {
     final text = _ctrl.text.trim();
     if (text.isEmpty) return;
@@ -62,30 +69,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-            leading: const Icon(Icons.notifications_off_outlined),
-            title: const Text('Mute notifications'),
-            subtitle: const Text('Coming soon', style: TextStyle(fontSize: 11)),
-            onTap: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Muting is not yet available in this build.'),
-                duration: Duration(seconds: 2),
-              ));
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.delete_outline, color: Colors.red),
-            title: const Text('Clear conversation',
-                style: TextStyle(color: Colors.red)),
-            onTap: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Clear conversation is not yet available'),
-                duration: Duration(seconds: 2),
-              ));
-            },
-          ),
+          // Mute / Clear-conversation hidden for v1.0 — not yet implemented.
+          // Report + Block below are fully functional (write to Firestore).
           ListTile(
             leading: const Icon(Icons.flag_outlined, color: Colors.red),
             title:
@@ -163,15 +148,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
     );
   }
 
-  Future<void> _pickImage() async {
-    // Image uploads are not yet wired to Firebase Storage.
-    // Show a clear message rather than silently dropping the picked image.
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Image messages are coming soon. You can send text for now.'),
-      duration: Duration(seconds: 2),
-    ));
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -277,12 +253,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
           decoration: BoxDecoration(color: Colors.white,
             border: Border(top: BorderSide(color: Colors.grey.shade200))),
           child: Row(children: [
-            IconButton(
-              icon: const Icon(Icons.add_circle_outline),
-              color: Colors.grey,
-              tooltip: 'Attach image',
-              onPressed: _pickImage,
-            ),
+            // Image attach hidden for v1.0 — image messages not yet wired to Storage.
             Expanded(child: TextField(
               controller: _ctrl,
               onChanged: (v) => context.read<ChatProvider>().setTyping(widget.chatId, v.isNotEmpty),
