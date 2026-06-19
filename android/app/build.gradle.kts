@@ -39,7 +39,7 @@ android {
 
     defaultConfig {
         applicationId = "com.urbansyncinnovations.flyconnect"
-        minSdk = 23                               // Firebase Auth requires 23+ (pinned, not the Flutter default)
+        minSdk = flutter.minSdkVersion            // = 24 in this Flutter SDK (> Firebase Auth's 23). Flutter's gradle migration rewrites a hard literal back to this, so we track its floor.
         targetSdk = 35         // Google Play requires API 35 for new uploads (since Aug 2025)
         versionCode = flutter.versionCode
         versionName = flutter.versionName
