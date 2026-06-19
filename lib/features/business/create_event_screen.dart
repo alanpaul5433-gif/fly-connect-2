@@ -76,9 +76,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       isFeatured: false,
       createdAt: DateTime.now(),
     );
-    // ignore: use_build_context_synchronously
     context.read<EventProvider>().addEvent(newEvent);
-    // ignore: use_build_context_synchronously
     if (mounted) {
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(

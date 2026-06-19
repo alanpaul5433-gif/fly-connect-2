@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../shared/models/models.dart';
 import '../../shared/mock/story_state.dart';
 import '../../core/constants/app_colors.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class StoryViewerScreen extends StatefulWidget {
   final UserModel user;
@@ -85,13 +86,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
       return Image.memory(widget.imageBytes!, fit: BoxFit.cover);
     }
     if (widget.storyImageUrl.isNotEmpty) {
-      return Image.network(
-        widget.storyImageUrl,
+      return CachedFeedImage(
+        url: widget.storyImageUrl,
         fit: BoxFit.cover,
-        loadingBuilder: (_, child, progress) => progress == null
-            ? child
-            : const Center(child: CircularProgressIndicator(color: AppColors.primary)),
-        errorBuilder: (_, __, ___) => Container(
+        placeholder: const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        errorWidget: Container(
           color: AppColors.dark,
           child: const Center(
             child: Icon(Icons.image_not_supported_outlined, color: Colors.white54, size: 48),

@@ -10,6 +10,7 @@ import '../../shared/providers/chat_provider.dart';
 import '../../shared/utils/open_chat.dart';
 import '../../shared/models/models.dart';
 import '../home/main_shell.dart' show AppDrawer;
+import '../../shared/widgets/cached_image.dart';
 
 class MatchScreen extends StatefulWidget {
   const MatchScreen({super.key});
@@ -208,8 +209,9 @@ class _SwipeCardState extends State<_SwipeCard> {
                 child: Stack(fit: StackFit.expand, children: [
                   // Photo
                   u.photoUrl != null
-                    ? Image.network(u.photoUrl!, fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _PlaceholderAvatar(name: u.name))
+                    ? RepaintBoundary(
+                        child: CachedFeedImage(url: u.photoUrl!, fit: BoxFit.cover,
+                          errorWidget: _PlaceholderAvatar(name: u.name)))
                     : _PlaceholderAvatar(name: u.name),
                   // Gradient overlay
                   const DecoratedBox(decoration: BoxDecoration(

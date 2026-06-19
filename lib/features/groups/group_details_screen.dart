@@ -10,6 +10,7 @@ import '../../shared/providers/chat_provider.dart';
 import '../../shared/providers/post_provider.dart';
 import '../../shared/widgets/confirm_dialog.dart';
 import '../../shared/widgets/shared_widgets.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class GroupDetailsScreen extends StatefulWidget {
   final String groupId;
@@ -26,7 +27,7 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 3, vsync: this);
+    _tabs = TabController(length: 2, vsync: this);
     _load();
   }
 
@@ -174,8 +175,8 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
             flexibleSpace: FlexibleSpaceBar(
               background: Stack(fit: StackFit.expand, children: [
                 g.imageUrl != null
-                  ? Image.network(g.imageUrl!, fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(color: AppColors.dark))
+                  ? CachedFeedImage(url: g.imageUrl!, fit: BoxFit.cover,
+                      errorWidget: Container(color: AppColors.dark))
                   : Container(color: AppColors.dark,
                       child: const Center(child: Icon(Icons.group, color: AppColors.primary, size: 72))),
                 Container(decoration: BoxDecoration(
@@ -273,12 +274,10 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
             tabs: [
               Tab(text: 'Posts (${groupPosts.length})'),
               const Tab(text: 'Members'),
-              const Tab(text: 'Events'),
             ]),
           Expanded(child: TabBarView(controller: _tabs, children: [
             _PostsTab(posts: groupPosts),
             _MembersTab(members: g.members),
-            _EventsTab(groupId: g.id),
           ])),
         ]),
       ),
@@ -346,8 +345,8 @@ class _PostCard extends StatelessWidget {
         if (post.mediaUrls.isNotEmpty)
           ClipRRect(
             borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
-            child: Image.network(post.mediaUrls.first, width: double.infinity, height: 180, fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => const SizedBox()),
+            child: CachedFeedImage(url: post.mediaUrls.first, width: double.infinity, height: 180, fit: BoxFit.cover,
+              errorWidget: const SizedBox()),
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
@@ -457,12 +456,4 @@ class _MembersTabState extends State<_MembersTab> {
       )),
     ]);
   }
-}
-
-class _EventsTab extends StatelessWidget {
-  final String groupId;
-  const _EventsTab({required this.groupId});
-  @override
-  Widget build(BuildContext context) => const Center(
-    child: Text('Group events coming soon', style: TextStyle(color: Colors.grey)));
 }

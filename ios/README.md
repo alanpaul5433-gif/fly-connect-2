@@ -12,7 +12,7 @@ Always use the **workspace**, not the `.xcodeproj` — CocoaPods needs the works
 
 ## 2. Configure the Runner target
 
-- **Bundle Identifier:** `com.appcurb.flyconnect` (must match `android/app/build.gradle.kts`, `google-services.json`, and `lib/core/config/firebase_config.dart`)
+- **Bundle Identifier:** `com.urbansyncinnovations.flyconnect` (must match `android/app/build.gradle.kts`, `google-services.json`, and `lib/core/config/firebase_config.dart`)
 - **Team:** assign your Apple Developer team
 - **Deployment Target:** iOS 13.0 or higher (Firebase Auth requires 13+)
 - **Display Name:** FlyConnect
@@ -28,7 +28,7 @@ In Xcode → Signing & Capabilities, add:
 ## 4. Download and add GoogleService-Info.plist
 
 1. Firebase Console → Project Settings → Add app → iOS
-2. Register with bundle ID `com.appcurb.flyconnect`
+2. Register with bundle ID `com.urbansyncinnovations.flyconnect`
 3. Download `GoogleService-Info.plist`
 4. Drag it into `ios/Runner/` in Xcode (enable "Copy items if needed", add to Runner target)
 

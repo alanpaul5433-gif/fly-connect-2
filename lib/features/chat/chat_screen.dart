@@ -11,6 +11,7 @@ import '../../shared/models/models.dart';
 import '../../shared/widgets/skeleton.dart';
 import '../../shared/widgets/shared_widgets.dart';
 import '../../shared/widgets/inline_error_banner.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -231,11 +232,11 @@ class _ChatTile extends StatelessWidget {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: Stack(children: [
-        CircleAvatar(radius: 26,
+        CachedAvatar(
+          url: isGroup ? chat.groupPhotoUrl : null,
+          radius: 26,
           backgroundColor: isGroup ? AppColors.dark : AppColors.backgroundGrey,
-          backgroundImage: (isGroup ? chat.groupPhotoUrl : null) != null
-            ? NetworkImage(isGroup ? chat.groupPhotoUrl! : '') : null,
-          child: (isGroup && chat.groupPhotoUrl == null)
+          fallback: (isGroup && chat.groupPhotoUrl == null)
             ? const Icon(Icons.group, color: AppColors.primary)
             : null),
         Positioned(bottom: 0, right: 0,

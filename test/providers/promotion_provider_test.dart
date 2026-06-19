@@ -10,15 +10,15 @@ void main() {
     db = FakeFirebaseFirestore();
   });
 
-  DateTime _daysFromNow(int days) =>
+  DateTime daysFromNow(int days) =>
       DateTime.now().add(Duration(days: days));
 
   test('active promotion: validFrom in past, validTo in future', () async {
     await db.collection('promotions').add({
       'businessId': 'biz-1',
       'title': 'Active promo',
-      'validFrom': Timestamp.fromDate(_daysFromNow(-5)),
-      'validTo': Timestamp.fromDate(_daysFromNow(5)),
+      'validFrom': Timestamp.fromDate(daysFromNow(-5)),
+      'validTo': Timestamp.fromDate(daysFromNow(5)),
       'isActive': true,
     });
 
@@ -36,8 +36,8 @@ void main() {
     await db.collection('promotions').add({
       'businessId': 'biz-1',
       'title': 'Old promo',
-      'validFrom': Timestamp.fromDate(_daysFromNow(-30)),
-      'validTo': Timestamp.fromDate(_daysFromNow(-1)),
+      'validFrom': Timestamp.fromDate(daysFromNow(-30)),
+      'validTo': Timestamp.fromDate(daysFromNow(-1)),
       'isActive': false,
     });
 
@@ -51,8 +51,8 @@ void main() {
     await db.collection('promotions').add({
       'businessId': 'biz-1',
       'title': 'Future promo',
-      'validFrom': Timestamp.fromDate(_daysFromNow(3)),
-      'validTo': Timestamp.fromDate(_daysFromNow(30)),
+      'validFrom': Timestamp.fromDate(daysFromNow(3)),
+      'validTo': Timestamp.fromDate(daysFromNow(30)),
       'isActive': false,
     });
 

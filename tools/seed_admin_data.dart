@@ -11,11 +11,12 @@
 ///
 /// Auto-runs on launch (no button click required). Safe to re-run; each
 /// call adds a fresh batch with timestamped IDs.
+library;
 
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../lib/core/config/firebase_config.dart';
+import 'package:flyconnect/core/config/firebase_config.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

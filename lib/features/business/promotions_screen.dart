@@ -8,6 +8,7 @@ import '../../core/constants/app_text_styles.dart';
 import '../../shared/models/models.dart';
 import '../../shared/providers/providers.dart';
 import '../../shared/widgets/shared_widgets.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class PromotionsScreen extends StatelessWidget {
   const PromotionsScreen({super.key});
@@ -91,8 +92,8 @@ class _PromotionCard extends StatelessWidget {
         if (promo.imageUrl != null)
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-            child: Image.network(promo.imageUrl!, height: 140, width: double.infinity, fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(height: 140, color: AppColors.backgroundGrey)),
+            child: CachedFeedImage(url: promo.imageUrl!, height: 140, width: double.infinity, fit: BoxFit.cover,
+              errorWidget: Container(height: 140, color: AppColors.backgroundGrey)),
           ),
         Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [

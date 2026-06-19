@@ -8,6 +8,7 @@ import '../../core/constants/app_text_styles.dart';
 import '../../shared/providers/event_provider.dart';
 import '../../shared/models/models.dart';
 import '../../shared/widgets/shared_widgets.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class EventDetailsScreen extends StatefulWidget {
   final String? eventId;
@@ -111,8 +112,8 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
           flexibleSpace: FlexibleSpaceBar(
             background: Stack(fit: StackFit.expand, children: [
               e.imageUrl != null
-                ? Image.network(e.imageUrl!, fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(color: AppColors.dark))
+                ? CachedFeedImage(url: e.imageUrl!, fit: BoxFit.cover,
+                    errorWidget: Container(color: AppColors.dark))
                 : Container(color: AppColors.dark,
                     child: const Center(child: Icon(Icons.event, color: AppColors.primary, size: 72))),
               Container(decoration: BoxDecoration(

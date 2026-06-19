@@ -50,8 +50,10 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         }
         return;
       }
-    } catch (_) {
-      // AuthProvider type mismatch in mock mode — fall through to login
+    } catch (e) {
+      // AuthProvider type mismatch in mock mode — fall through to login.
+      // Log so a real (non-mock) failure here isn't an invisible logout.
+      debugPrint('[Splash] auth/role resolution failed, routing to login: $e');
     }
     // Not logged in (or mock mode) — check onboarding then go to login
     final prefs = await SharedPreferences.getInstance();

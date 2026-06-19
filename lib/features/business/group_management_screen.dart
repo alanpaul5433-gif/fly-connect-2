@@ -23,46 +23,17 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
   }
 
   void _showBroadcast(BuildContext context) {
-    final ctrl = TextEditingController();
+    // Capture the host messenger before the sheet route is pushed so the
+    // success SnackBar resolves against this screen, not the sheet.
+    final messenger = ScaffoldMessenger.of(context);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Broadcast Message', style: AppTextStyles.labelLarge),
-          const SizedBox(height: 4),
-          Text('Send to all ${_members.length} members', style: AppTextStyles.caption),
-          const SizedBox(height: 16),
-          TextField(
-            controller: ctrl,
-            maxLines: 4,
-            decoration: InputDecoration(
-              hintText: 'Write your message...',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.primary)),
-            ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Message sent to all members'), duration: Duration(seconds: 2)));
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: AppColors.dark,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-              child: const Text('Send Broadcast', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ),
-        ]),
+      builder: (_) => _BroadcastSheet(
+        memberCount: _members.length,
+        onSend: () => messenger.showSnackBar(
+          const SnackBar(content: Text('Message sent to all members'), duration: Duration(seconds: 2))),
       ),
     );
   }
@@ -84,10 +55,7 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Colors.black),
             onSelected: (val) {
-              if (val == 'edit') {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Edit Group coming soon')));
-              } else if (val == 'delete') {
+              if (val == 'delete') {
                 showDialog(context: context, builder: (_) => AlertDialog(
                   title: const Text('Delete Group'),
                   content: const Text('Are you sure you want to delete this group? This cannot be undone.'),
@@ -100,7 +68,6 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
               }
             },
             itemBuilder: (_) => const [
-              PopupMenuItem(value: 'edit', child: Text('Edit Group')),
               PopupMenuItem(value: 'delete', child: Text('Delete Group', style: TextStyle(color: Colors.red))),
             ],
           ),
@@ -260,6 +227,66 @@ class _StatCard extends StatelessWidget {
         const SizedBox(height: 8),
         Text(value, style: AppTextStyles.labelMedium.copyWith(color: AppColors.primary)),
         Text(label, style: AppTextStyles.caption.copyWith(color: Colors.white70)),
+      ]),
+    );
+  }
+}
+
+/// Broadcast composer shown in a bottom sheet. Owns its [TextEditingController]
+/// so it is disposed when the sheet closes (a bare modal builder leaks it).
+class _BroadcastSheet extends StatefulWidget {
+  final int memberCount;
+  final VoidCallback onSend;
+  const _BroadcastSheet({required this.memberCount, required this.onSend});
+
+  @override
+  State<_BroadcastSheet> createState() => _BroadcastSheetState();
+}
+
+class _BroadcastSheetState extends State<_BroadcastSheet> {
+  final TextEditingController _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Broadcast Message', style: AppTextStyles.labelLarge),
+        const SizedBox(height: 4),
+        Text('Send to all ${widget.memberCount} members', style: AppTextStyles.caption),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _ctrl,
+          maxLines: 4,
+          decoration: InputDecoration(
+            hintText: 'Write your message...',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.primary)),
+          ),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              widget.onSend();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: AppColors.dark,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+            child: const Text('Send Broadcast', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ),
       ]),
     );
   }

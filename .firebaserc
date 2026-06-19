@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "flyconnect-ab4f2"
-  }
+  },
+  "targets": {
+    "flyconnect-ab4f2": {
+      "hosting": {
+        "admin": [
+          "flyconnect-ab4f2"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

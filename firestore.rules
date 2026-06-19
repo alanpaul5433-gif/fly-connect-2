@@ -34,7 +34,7 @@ service cloud.firestore {
               'name','phone','photoUrl','bio','airline','airport','position',
               'city','state','hobbies','passportStamps','travelHistory',
               'followerCount','followingCount','postCount',
-              'lastSeen','fcmToken','matchType'
+              'lastSeen','fcmToken','matchType','matchPrefs'
             ]));
       allow delete: if isAdmin();
 

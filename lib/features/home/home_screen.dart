@@ -20,6 +20,7 @@ import '../../shared/mock/story_state.dart';
 import 'post_details_screen.dart';
 import 'story_viewer_screen.dart';
 import 'main_shell.dart' show AppDrawer;
+import '../../shared/widgets/cached_image.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -76,8 +77,15 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         Expanded(
-          child: Consumer<PostProvider>(
-            builder: (context, provider, _) {
+          child: Selector<PostProvider, (List<PostModel>, String?, bool, bool)>(
+            // Rebuild only when the feed list identity or its status flags
+            // change — not on every unrelated PostProvider notify (e.g. a
+            // like/save toggle the card already handles optimistically).
+            selector: (_, p) => (p.feed, p.feedError, p.feedHasMore, p.feedLoadingMore),
+            builder: (context, _, __) {
+              // Status flags + methods are read non-reactively; the Selector
+              // above is what gates rebuilds.
+              final provider = context.read<PostProvider>();
               final posts = provider.feed;
               final feedError = provider.feedError;
               // First real data arrived → mark load complete so future
@@ -420,12 +428,12 @@ class _PromoMiniCard extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Stack(children: [
             promo.imageUrl != null
-                ? Image.network(
-                    promo.imageUrl!,
+                ? CachedFeedImage(
+                    url: promo.imageUrl!,
                     height: 90,
                     width: double.infinity,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _placeholder(),
+                    errorWidget: _placeholder(),
                   )
                 : _placeholder(),
             Positioned(
@@ -620,10 +628,12 @@ class _PostCardState extends State<_PostCard> {
         child: Row(children: [
           GestureDetector(
             onTap: () => context.push('/users/${p.authorId}'),
-            child: CircleAvatar(radius: 20,
+            child: CachedAvatar(
+              url: p.authorPhotoUrl,
+              radius: 20,
               backgroundColor: AppColors.backgroundGrey,
-              backgroundImage: p.authorPhotoUrl != null ? NetworkImage(p.authorPhotoUrl!) : null,
-              child: p.authorPhotoUrl == null ? Text(p.authorName.isNotEmpty ? p.authorName[0] : '?', style: const TextStyle(color: AppColors.dark)) : null),
+              fallback: Text(p.authorName.isNotEmpty ? p.authorName[0] : '?', style: const TextStyle(color: AppColors.dark)),
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -644,16 +654,17 @@ class _PostCardState extends State<_PostCard> {
         child: p.mediaUrls.isNotEmpty
             ? ClipRRect(
                 borderRadius: BorderRadius.zero,
-                child: Image.network(
-                  p.mediaUrls.first,
-                  height: 280,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (_, child, progress) => progress == null ? child
-                      : Container(height: 280, color: AppColors.backgroundGrey,
-                          child: const Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2))),
-                  errorBuilder: (_, __, ___) => Container(height: 280, color: AppColors.backgroundGrey,
-                      child: const Icon(Icons.image_not_supported_outlined, color: AppColors.textSecondary)),
+                child: RepaintBoundary(
+                  child: CachedFeedImage(
+                    url: p.mediaUrls.first,
+                    height: 280,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    placeholder: Container(height: 280, color: AppColors.backgroundGrey,
+                        child: const Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2))),
+                    errorWidget: Container(height: 280, color: AppColors.backgroundGrey,
+                        child: const Icon(Icons.image_not_supported_outlined, color: AppColors.textSecondary)),
+                  ),
                 ))
             : Container(
                 height: 180,

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/models/models.dart';
+import '../../shared/providers/user_provider.dart';
 
 class PromotionDetailScreen extends StatelessWidget {
   final PromotionModel promotion;
@@ -15,6 +17,13 @@ class PromotionDetailScreen extends StatelessWidget {
     final p = promotion;
     final redemptionPct = p.maxRedemptions > 0 ? p.currentRedemptions / p.maxRedemptions : 0.0;
     final savesPct = p.views > 0 ? p.saves / p.views : 0.0;
+
+    // Performance metrics (views/saves/redemptions) belong to the business that
+    // runs the promotion — or an admin moderating it. Crew browsing a deal must
+    // never see another company's analytics. Fail closed when the viewer is unknown.
+    final me = context.watch<UserProvider>().currentUser;
+    final isOwnerOrAdmin =
+        me != null && (me.uid == p.businessId || me.role == 'admin');
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -82,15 +91,18 @@ class PromotionDetailScreen extends StatelessWidget {
                 // Description
                 Text(p.description, style: AppTextStyles.bodyMedium),
 
-                const SizedBox(height: 16),
-                // Stats row
-                Row(children: [
-                  _StatChip(icon: Icons.visibility_outlined, label: '${p.views} views'),
-                  const SizedBox(width: 10),
-                  _StatChip(icon: Icons.bookmark_outline, label: '${p.saves} saves'),
-                  const SizedBox(width: 10),
-                  _StatChip(icon: Icons.check_circle_outline, label: '${p.currentRedemptions}/${p.maxRedemptions}'),
-                ]),
+                // Business-only: a crew member browsing the deal must not see the
+                // promoting business's performance metrics.
+                if (isOwnerOrAdmin) ...[
+                  const SizedBox(height: 16),
+                  Row(children: [
+                    _StatChip(icon: Icons.visibility_outlined, label: '${p.views} views'),
+                    const SizedBox(width: 10),
+                    _StatChip(icon: Icons.bookmark_outline, label: '${p.saves} saves'),
+                    const SizedBox(width: 10),
+                    _StatChip(icon: Icons.check_circle_outline, label: '${p.currentRedemptions}/${p.maxRedemptions}'),
+                  ]),
+                ],
 
                 const Divider(height: 32),
 
@@ -128,16 +140,17 @@ class PromotionDetailScreen extends StatelessWidget {
                   ),
                 ),
 
-                const Divider(height: 32),
-
-                // Analytics
-                const Text('Analytics', style: AppTextStyles.labelLarge),
-                const SizedBox(height: 12),
-                _AnalyticsBar(label: 'Views', value: p.views, progress: 1.0),
-                const SizedBox(height: 10),
-                _AnalyticsBar(label: 'Saves', value: p.saves, progress: savesPct.clamp(0.0, 1.0)),
-                const SizedBox(height: 10),
-                _AnalyticsBar(label: 'Redemptions', value: p.currentRedemptions, progress: redemptionPct.clamp(0.0, 1.0)),
+                // Business-only analytics — hidden from crew browsing the deal.
+                if (isOwnerOrAdmin) ...[
+                  const Divider(height: 32),
+                  const Text('Analytics', style: AppTextStyles.labelLarge),
+                  const SizedBox(height: 12),
+                  _AnalyticsBar(label: 'Views', value: p.views, progress: 1.0),
+                  const SizedBox(height: 10),
+                  _AnalyticsBar(label: 'Saves', value: p.saves, progress: savesPct.clamp(0.0, 1.0)),
+                  const SizedBox(height: 10),
+                  _AnalyticsBar(label: 'Redemptions', value: p.currentRedemptions, progress: redemptionPct.clamp(0.0, 1.0)),
+                ],
                 const SizedBox(height: 32),
               ]),
             ),

@@ -22,9 +22,19 @@ Future<void> main() async {
     // Install the friendly error fallback as early as possible — before
     // Firebase init, in case Firebase itself throws during boot.
     ErrorBoundary.install();
-    await Firebase.initializeApp(
-      options: FirebaseConfig.currentPlatformOptions,
-    );
+    // Android/iOS auto-initialize the [DEFAULT] app natively from
+    // google-services.json / GoogleService-Info.plist (the Gradle / CocoaPods
+    // plugins run before any Dart). Calling initializeApp again then throws
+    // `duplicate-app`. Swallow exactly that case — the native default app is
+    // already live and carries the correct google_app_id, so we inherit it —
+    // and rethrow anything else.
+    try {
+      await Firebase.initializeApp(
+        options: FirebaseConfig.currentPlatformOptions,
+      );
+    } on FirebaseException catch (e) {
+      if (e.code != 'duplicate-app') rethrow;
+    }
 
     // Crashlytics wiring (Crashlytics is not supported on web).
     if (!kIsWeb) {

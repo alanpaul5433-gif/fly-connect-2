@@ -88,7 +88,7 @@ class FeedPostSkeleton extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: const [
+          const Row(children: [
             Skeleton.circle(size: 40),
             SizedBox(width: 10),
             Expanded(
@@ -113,7 +113,7 @@ class FeedPostSkeleton extends StatelessWidget {
           const SizedBox(height: 6),
           const Skeleton(width: 220, height: 12),
           const SizedBox(height: 14),
-          Row(children: const [
+          const Row(children: [
             Skeleton(width: 50, height: 12),
             SizedBox(width: 16),
             Skeleton(width: 50, height: 12),

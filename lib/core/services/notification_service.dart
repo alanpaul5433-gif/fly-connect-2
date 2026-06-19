@@ -121,9 +121,11 @@ class NotificationService {
           .collection('users')
           .doc(uid)
           .update({'fcmToken': token});
-    } catch (_) {
+    } catch (e) {
       // Doc may not exist yet (first sign-up); the auth listener will retry
-      // the next time it fires.
+      // the next time it fires. Log so a *persistent* failure (which means no
+      // push delivery) is visible rather than silent.
+      debugPrint('[FCM] token save deferred (will retry on next auth event): $e');
     }
   }
 

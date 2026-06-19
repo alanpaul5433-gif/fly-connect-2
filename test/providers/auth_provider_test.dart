@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart';
-import 'package:firebase_auth/firebase_auth.dart' as fb;
 
 /// Tests for AuthProvider-equivalent logic.
 ///
@@ -59,7 +58,7 @@ void main() {
     });
 
     test('Firestore user doc creation on signup', () async {
-      final uid = 'test-uid-123';
+      const uid = 'test-uid-123';
       await db.collection('users').doc(uid).set({
         'uid': uid,
         'name': 'Test User',

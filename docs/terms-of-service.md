@@ -1,9 +1,9 @@
 # Terms of Service
 
-**Effective date:** _[INSERT DATE WHEN PUBLISHED]_
-**Last updated:** _[INSERT DATE]_
+**Effective date:** 2026-06-19
+**Last updated:** 2026-06-19
 
-These Terms of Service ("Terms") govern your use of the **FlyConnect** mobile application and related services (the "Service") operated by **AppCurb Technologies** ("Company", "we", "us", "our").
+These Terms of Service ("Terms") govern your use of the **FlyConnect** mobile application and related services (the "Service") operated by **Urban Sync Innovations** ("Company", "we", "us", "our").
 
 By creating an account or using the Service, you agree to these Terms. If you do not agree, do not use the Service.
 
@@ -126,7 +126,7 @@ We may suspend business accounts that post false, misleading, or predatory offer
 
 ### 7.1 Our content
 
-The Service, including its design, code, logos, text, graphics, and software, is owned by AppCurb Technologies and protected by copyright, trademark, and other laws.
+The Service, including its design, code, logos, text, graphics, and software, is owned by Urban Sync Innovations and protected by copyright, trademark, and other laws.
 
 ### 7.2 Feedback
 
@@ -166,7 +166,7 @@ We do not warrant that:
 
 ## 10. Limitation of Liability
 
-**TO THE MAXIMUM EXTENT PERMITTED BY LAW**, AppCurb Technologies and its directors, employees, and agents shall not be liable for any indirect, incidental, special, consequential, or punitive damages, including loss of profits, data, or goodwill, arising out of or relating to your use of the Service.
+**TO THE MAXIMUM EXTENT PERMITTED BY LAW**, Urban Sync Innovations and its directors, employees, and agents shall not be liable for any indirect, incidental, special, consequential, or punitive damages, including loss of profits, data, or goodwill, arising out of or relating to your use of the Service.
 
 Our total liability for any claim arising out of these Terms or your use of the Service shall not exceed **the greater of $100 USD or the amount you paid us, if any, in the 12 months preceding the claim**.
 
@@ -176,7 +176,7 @@ Some jurisdictions do not allow the exclusion or limitation of certain damages â
 
 ## 11. Indemnification
 
-You agree to indemnify, defend, and hold harmless AppCurb Technologies from any claims, damages, losses, or expenses (including legal fees) arising out of your:
+You agree to indemnify, defend, and hold harmless Urban Sync Innovations from any claims, damages, losses, or expenses (including legal fees) arising out of your:
 
 - Use of the Service
 - Violation of these Terms
@@ -223,8 +223,8 @@ _(Arbitration clause is optional and depends on jurisdiction â€” remove if not a
 - **General inquiries:** support@flyconnect.app
 - **Legal notices:** legal@flyconnect.app
 - **DMCA:** dmca@flyconnect.app
-- **Postal:** AppCurb Technologies, _[INSERT REGISTERED BUSINESS ADDRESS]_
+- **Postal:** Urban Sync Innovations, _[INSERT REGISTERED BUSINESS ADDRESS]_
 
 ---
 
-_These Terms of Service were last updated on [INSERT DATE]._
+_These Terms of Service were last updated on 2026-06-19._

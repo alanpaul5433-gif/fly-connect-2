@@ -57,9 +57,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       isPinned: false,
       createdAt: DateTime.now(),
     );
-    // ignore: use_build_context_synchronously
     context.read<GroupProvider>().createGroup(newGroup);
-    // ignore: use_build_context_synchronously
     if (mounted) {
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -84,22 +82,6 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Cover image placeholder
-          Container(
-            height: 160, width: double.infinity,
-            decoration: BoxDecoration(
-              color: AppColors.backgroundGrey,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey.shade200),
-            ),
-            child: const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.add_photo_alternate_outlined, size: 40, color: AppColors.textSecondary),
-              SizedBox(height: 6),
-              Text('Add Cover Photo', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-            ])),
-          ),
-          const SizedBox(height: 20),
-
           const Text('Group Name *', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
           const SizedBox(height: 6),
           _buildField(_titleCtrl, 'e.g. Delta Pilots Network'),

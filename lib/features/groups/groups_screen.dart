@@ -7,6 +7,7 @@ import '../../shared/providers/group_provider.dart';
 import '../../shared/providers/auth_provider.dart';
 import '../../shared/models/models.dart';
 import '../../shared/widgets/shared_widgets.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class GroupsScreen extends StatelessWidget {
   const GroupsScreen({super.key});
@@ -73,10 +74,11 @@ class GroupsScreen extends StatelessWidget {
             borderRadius: BorderRadius.circular(16)),
           child: ListTile(
             contentPadding: const EdgeInsets.all(12),
-            leading: CircleAvatar(radius: 28,
-              backgroundImage: g.imageUrl != null ? NetworkImage(g.imageUrl!) : null,
+            leading: CachedAvatar(
+              url: g.imageUrl,
+              radius: 28,
               backgroundColor: AppColors.primary,
-              child: g.imageUrl == null ? const Icon(Icons.group, color: AppColors.dark) : null),
+              fallback: const Icon(Icons.group, color: AppColors.dark)),
             title: Row(children: [
               Expanded(child: Text(g.name, style: const TextStyle(fontWeight: FontWeight.w600))),
               if (g.isPinned) const Icon(Icons.push_pin, size: 14, color: AppColors.primary),
@@ -85,17 +87,32 @@ class GroupsScreen extends StatelessWidget {
               Text(g.description, maxLines: 2, overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 12, color: Colors.grey)),
               const SizedBox(height: 4),
-              Row(children: [
-                Icon(Icons.people, size: 12, color: Colors.grey.shade400),
+              // Member count + up to 2 tag chips. Wrapped in Expanded→Wrap so a
+              // large member count or long tags flow to a second line instead of
+              // overflowing the ListTile subtitle (was a RenderFlex overflow).
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Icon(Icons.people, size: 12, color: Colors.grey.shade400),
+                ),
                 const SizedBox(width: 4),
-                Text('${g.memberCount} members', style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                const SizedBox(width: 8),
-                ...g.tags.take(2).map((tag) => Container(
-                  margin: const EdgeInsets.only(right: 4),
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8)),
-                  child: Text(tag, style: const TextStyle(fontSize: 10, color: AppColors.dark)))),
+                Expanded(
+                  child: Wrap(
+                    spacing: 6, runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text('${g.memberCount} members',
+                        style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                      ...g.tags.take(2).map((tag) => Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8)),
+                        child: Text(tag,
+                          style: const TextStyle(fontSize: 10, color: AppColors.dark)))),
+                    ],
+                  ),
+                ),
               ]),
             ]),
             trailing: isMember

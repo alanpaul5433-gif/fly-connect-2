@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_routes.dart';
+import '../../core/constants/legal_urls.dart';
 import '../../shared/widgets/shared_widgets.dart';
 import '../../shared/providers/auth_provider.dart';
 
@@ -162,11 +163,11 @@ class _SignupScreenState extends State<SignupScreen> {
       }
       final age = _ageInYears(_dob!);
       if (age < _minAge) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text(
               'You must be at least $_minAge years old to use FlyConnect.'),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 4),
+          duration: Duration(seconds: 4),
         ));
         return;
       }
@@ -388,7 +389,7 @@ class _SignupScreenState extends State<SignupScreen> {
                                   decoration: TextDecoration.underline),
                               recognizer: TapGestureRecognizer()
                                 ..onTap = () => launchUrl(
-                                    Uri.parse('https://flyconnect.app/terms'),
+                                    Uri.parse(LegalUrls.termsOfService),
                                     mode: LaunchMode.externalApplication),
                             ),
                             const TextSpan(text: ' and '),
@@ -400,7 +401,7 @@ class _SignupScreenState extends State<SignupScreen> {
                                   decoration: TextDecoration.underline),
                               recognizer: TapGestureRecognizer()
                                 ..onTap = () => launchUrl(
-                                    Uri.parse('https://flyconnect.app/privacy'),
+                                    Uri.parse(LegalUrls.privacyPolicy),
                                     mode: LaunchMode.externalApplication),
                             ),
                             const TextSpan(

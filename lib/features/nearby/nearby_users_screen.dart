@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -36,6 +35,15 @@ String _statusLabel(String? status) => switch (status) {
   _           => '',
 };
 
+/// Google Maps marker hue per SafeCheck status (markers are bitmaps, so we
+/// can't reuse the [Color]s — we map to the SDK's predefined hues instead).
+double _statusHue(String? status) => switch (status) {
+  'safe'      => BitmapDescriptor.hueGreen,
+  'unsure'    => BitmapDescriptor.hueOrange,
+  'need_help' => BitmapDescriptor.hueRed,
+  _           => BitmapDescriptor.hueYellow,
+};
+
 // ─── Nearby user model ───────────────────────────────────────
 class _NearbyUser {
   final String uid, name, airline, position, distance;
@@ -64,7 +72,7 @@ class NearbyUsersScreen extends StatefulWidget {
 class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
   _NearbyUser? _selected;
   bool _listView = false;
-  final _mapController = MapController();
+  GoogleMapController? _mapController;
   List<_NearbyUser> _nearbyUsers = [];
   bool _loadingUsers = true;
   String? _loadError;
@@ -245,56 +253,40 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
     );
   }
 
-  // ─── Map view ─────────────────────────────────────────────
+  // ─── Map view (Google Maps) ───────────────────────────────
   Widget _buildMap(SafeCheckProvider safeCheck) {
+    // Google Maps markers are bitmaps, not widgets — so the old avatar pins
+    // become status-coloured default markers. Tapping one still opens the
+    // user card overlay, same as before.
+    final markers = _nearbyUsers.map((u) {
+      final check = safeCheck.latestForUser(u.uid);
+      return Marker(
+        markerId: MarkerId(u.uid),
+        position: LatLng(u.lat, u.lng),
+        icon: BitmapDescriptor.defaultMarkerWithHue(_statusHue(check?.status)),
+        onTap: () => setState(() => _selected = u),
+      );
+    }).toSet();
+
     return Stack(children: [
-      FlutterMap(
-        mapController: _mapController,
-        options: MapOptions(
-          initialCenter: const LatLng(40.7128, -74.0060),
-          initialZoom: 14.0,
-          onTap: (_, __) => setState(() => _selected = null),
+      GoogleMap(
+        initialCameraPosition: const CameraPosition(
+          target: LatLng(40.7128, -74.0060),
+          zoom: 14,
         ),
-        children: [
-          TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'com.flyconnect.app',
-          ),
-          MarkerLayer(markers: _nearbyUsers.map((u) {
-            final check = safeCheck.latestForUser(u.uid);
-            final dotColor = check != null ? _statusColor(check.status) : AppColors.primary;
-            return Marker(
-              point: LatLng(u.lat, u.lng),
-              width: 60, height: 70,
-              child: GestureDetector(
-                onTap: () => setState(() => _selected = u),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: _selected == u ? AppColors.primary
-                            : check != null ? dotColor : Colors.white,
-                        width: _selected == u ? 3 : 2),
-                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 8)]),
-                    child: CircleAvatar(radius: 22,
-                      backgroundColor: AppColors.dark,
-                      child: Text(u.name.isNotEmpty ? u.name[0] : '?', style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)))),
-                  Container(width: 8, height: 8, margin: const EdgeInsets.only(top: 2),
-                    decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle)),
-                ]),
-              ),
-            );
-          }).toList()),
-        ],
+        markers: markers,
+        myLocationButtonEnabled: false,
+        zoomControlsEnabled: false,
+        onMapCreated: (controller) => _mapController = controller,
+        onTap: (_) => setState(() => _selected = null),
       ),
       // My location button
       Positioned(right: 16, bottom: _selected != null ? 260 : 100,
         child: FloatingActionButton.small(
           heroTag: 'my_location',
           backgroundColor: Colors.white,
-          onPressed: () => _mapController.move(const LatLng(40.7128, -74.0060), 14),
+          onPressed: () => _mapController?.animateCamera(
+            CameraUpdate.newLatLngZoom(const LatLng(40.7128, -74.0060), 14)),
           child: const Icon(Icons.my_location, color: AppColors.dark))),
       // Selected user card
       if (_selected != null) Positioned(

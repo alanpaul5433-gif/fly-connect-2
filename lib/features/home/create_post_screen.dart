@@ -367,14 +367,6 @@ final user = context.watch<AuthProvider>().currentUser;
                     ),
                     const Divider(height: 1, color: AppColors.backgroundGrey),
                     _DetailRow(
-                      icon: Icons.person_add_outlined,
-                      trailing: const Icon(Icons.chevron_right,
-                          color: AppColors.textSecondary, size: 20),
-                      child: Text('Tag crew members',
-                          style: AppTextStyles.bodyMedium.copyWith(color: AppColors.dark)),
-                    ),
-                    const Divider(height: 1, color: AppColors.backgroundGrey),
-                    _DetailRow(
                       icon: Icons.group_outlined,
                       trailing: const Icon(Icons.chevron_right,
                           color: AppColors.textSecondary, size: 20),
@@ -408,13 +400,6 @@ final user = context.watch<AuthProvider>().currentUser;
                             label: '#LayoverLife',
                             backgroundColor: AppColors.dark,
                             labelColor: AppColors.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          const _TagChip(
-                            label: '+ Add tag',
-                            backgroundColor: Colors.transparent,
-                            labelColor: AppColors.dark,
-                            outlined: true,
                           ),
                         ],
                       ),
@@ -505,13 +490,11 @@ class _TagChip extends StatelessWidget {
   final String label;
   final Color backgroundColor;
   final Color labelColor;
-  final bool outlined;
 
   const _TagChip({
     required this.label,
     required this.backgroundColor,
     required this.labelColor,
-    this.outlined = false,
   });
 
   @override
@@ -521,9 +504,6 @@ class _TagChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: backgroundColor,
         borderRadius: BorderRadius.circular(100),
-        border: outlined
-            ? Border.all(color: AppColors.inputBorder)
-            : null,
       ),
       child: Text(label,
           style: AppTextStyles.caption.copyWith(

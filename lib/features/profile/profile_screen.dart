@@ -14,6 +14,7 @@ import '../../shared/models/models.dart';
 import '../../shared/mock/story_state.dart';
 import '../home/story_viewer_screen.dart';
 import '../home/post_details_screen.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class ProfileScreen extends StatefulWidget {
   final bool isOwner;
@@ -196,8 +197,8 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             flexibleSpace: FlexibleSpaceBar(
               background: Stack(fit: StackFit.expand, children: [
                 u.photoUrl != null
-                  ? Image.network(u.photoUrl!, fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(color: AppColors.dark))
+                  ? CachedFeedImage(url: u.photoUrl!, fit: BoxFit.cover,
+                      errorWidget: Container(color: AppColors.dark))
                   : Container(color: AppColors.dark,
                       child: Center(child: Text(u.name.isNotEmpty ? u.name[0] : '?',
                         style: const TextStyle(color: AppColors.primary, fontSize: 72, fontWeight: FontWeight.bold)))),
@@ -418,10 +419,103 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           ListTile(leading: const Icon(Icons.lock_outline), title: const Text('Privacy settings'), onTap: () { Navigator.pop(context); context.push(AppRoutes.settings); }),
         ] else ...[
           ListTile(leading: const Icon(Icons.share_outlined), title: const Text('Share profile'), onTap: () => Navigator.pop(context)),
-          ListTile(leading: const Icon(Icons.block, color: Colors.red), title: const Text('Block user', style: TextStyle(color: Colors.red)), onTap: () => Navigator.pop(context)),
-          ListTile(leading: const Icon(Icons.flag_outlined, color: Colors.red), title: const Text('Report user', style: TextStyle(color: Colors.red)), onTap: () => Navigator.pop(context)),
+          ListTile(leading: const Icon(Icons.block, color: Colors.red), title: const Text('Block user', style: TextStyle(color: Colors.red)), onTap: () { Navigator.pop(context); _confirmBlockUser(); }),
+          ListTile(leading: const Icon(Icons.flag_outlined, color: Colors.red), title: const Text('Report user', style: TextStyle(color: Colors.red)), onTap: () { Navigator.pop(context); _reportUser(); }),
         ],
       ])));
+  }
+
+  /// Block the viewed user. The provider write (PostProvider.blockUser) already
+  /// exists and the profile both-direction filter already hides blocked users —
+  /// this just wires the button to it, behind a confirm, then leaves the screen.
+  Future<void> _confirmBlockUser() async {
+    final target = _user;
+    if (target == null) return;
+    final post = context.read<PostProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final router = GoRouter.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Block ${target.name}?'),
+        content: const Text(
+          "They won't be able to message you or see your profile, and they "
+          "won't appear in your chats, matches, or nearby. You can unblock "
+          "later from Settings.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Block',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await post.blockUser(target.uid);
+      if (!mounted) return;
+      setState(() => _blockedRelationship = true);
+      messenger.showSnackBar(
+        SnackBar(content: Text('${target.name} has been blocked')));
+      if (router.canPop()) router.pop();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('Could not block user: $e'),
+        backgroundColor: Colors.red));
+    }
+  }
+
+  /// Report the viewed user to moderation (Apple 1.2 / Play UGC). Persists a
+  /// `reports` doc via PostProvider.reportContent with the chosen reason.
+  Future<void> _reportUser() async {
+    final target = _user;
+    if (target == null) return;
+    final reason = await _pickReportReason();
+    if (reason == null || !mounted) return;
+    final post = context.read<PostProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await post.reportContent(
+        targetType: 'user', targetId: target.uid, reason: reason);
+      if (!mounted) return;
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Thanks — our team will review this report.')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('Could not submit report: $e'),
+        backgroundColor: Colors.red));
+    }
+  }
+
+  /// Canonical report reasons. Returns the chosen reason, or null if dismissed.
+  Future<String?> _pickReportReason() {
+    const reasons = [
+      'Spam or scam',
+      'Harassment or bullying',
+      'Inappropriate or explicit content',
+      'Fake or impersonating profile',
+      'Other',
+    ];
+    return showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('Report this profile',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+          for (final r in reasons)
+            ListTile(title: Text(r), onTap: () => Navigator.pop(ctx, r)),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
   }
 }
 
@@ -487,8 +581,8 @@ class _LikedPostsGrid extends StatelessWidget {
           itemBuilder: (context, i) {
             final post = posts[i];
             return post.mediaUrls.isNotEmpty
-              ? Image.network(post.mediaUrls.first, fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(color: AppColors.backgroundGrey))
+              ? CachedFeedImage(url: post.mediaUrls.first, fit: BoxFit.cover,
+                  errorWidget: Container(color: AppColors.backgroundGrey))
               : Container(color: AppColors.backgroundGrey,
                   child: Center(child: Text(post.caption.isNotEmpty ? post.caption[0] : '❤️',
                     style: const TextStyle(fontSize: 24))));
@@ -526,8 +620,8 @@ class _PostsGrid extends StatelessWidget {
               onTap: () => Navigator.push(context,
                 MaterialPageRoute(builder: (_) => PostDetailsScreen(post: post))),
               child: post.mediaUrls.isNotEmpty
-                ? Image.network(post.mediaUrls.first, fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(color: AppColors.backgroundGrey))
+                ? CachedFeedImage(url: post.mediaUrls.first, fit: BoxFit.cover,
+                    errorWidget: Container(color: AppColors.backgroundGrey))
                 : Container(color: AppColors.backgroundGrey,
                     child: Center(child: Text(post.caption.isNotEmpty ? post.caption[0] : '📝',
                       style: const TextStyle(fontSize: 24)))));

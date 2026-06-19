@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_routes.dart';
+import '../../core/constants/legal_urls.dart';
 import '../../shared/widgets/confirm_dialog.dart';
 import '../../shared/providers/auth_provider.dart';
 
@@ -110,9 +111,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _Tile(icon: Icons.help_outline, label: 'Help & Support',
             onTap: () => _showInfoSheet(context, 'Help & Support', 'Contact: support@flyconnect.app')),
           _Tile(icon: Icons.description_outlined, label: 'Terms of Service',
-            onTap: () => _openUrl('https://flyconnect.app/terms')),
+            onTap: () => _openUrl(LegalUrls.termsOfService)),
           _Tile(icon: Icons.privacy_tip_outlined, label: 'Privacy Policy',
-            onTap: () => _openUrl('https://flyconnect.app/privacy')),
+            onTap: () => _openUrl(LegalUrls.privacyPolicy)),
           _Tile(icon: Icons.info_outline, label: 'App Version',
             trailing: Text(_appVersion.isEmpty ? '…' : _appVersion,
                 style: const TextStyle(color: Colors.grey, fontSize: 13))),
@@ -156,98 +157,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _changePasswordSheet(BuildContext context) {
-    final currentCtrl = TextEditingController();
-    final newCtrl = TextEditingController();
-    final confirmCtrl = TextEditingController();
     showModalBottomSheet(context: context, isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Change Password', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 20),
-          TextField(controller: currentCtrl, obscureText: true,
-            decoration: _inputDec('Current password')),
-          const SizedBox(height: 12),
-          TextField(controller: newCtrl, obscureText: true,
-            decoration: _inputDec('New password')),
-          const SizedBox(height: 12),
-          TextField(controller: confirmCtrl, obscureText: true,
-            decoration: _inputDec('Confirm new password')),
-          const SizedBox(height: 20),
-          SizedBox(width: double.infinity, child: ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: AppColors.dark,
-              padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-            onPressed: () async {
-              final current = currentCtrl.text;
-              final newPass = newCtrl.text;
-              final confirm = confirmCtrl.text;
-
-              // Validation
-              if (current.isEmpty || newPass.isEmpty || confirm.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Please fill in all fields'),
-                  backgroundColor: Colors.red));
-                return;
-              }
-              if (newPass.length < 8) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('New password must be at least 8 characters'),
-                  backgroundColor: Colors.red));
-                return;
-              }
-              if (newPass != confirm) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Passwords do not match'),
-                  backgroundColor: Colors.red));
-                return;
-              }
-
-              final user = FirebaseAuth.instance.currentUser;
-              if (user == null || user.email == null) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Please sign in again to change your password.'),
-                  backgroundColor: Colors.red));
-                return;
-              }
-
-              try {
-                // Re-authenticate with the current password (Firebase requirement
-                // for sensitive operations on sessions older than a few minutes).
-                final cred = EmailAuthProvider.credential(
-                  email: user.email!,
-                  password: current,
-                );
-                await user.reauthenticateWithCredential(cred);
-                await user.updatePassword(newPass);
-                if (!context.mounted) return;
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Password updated successfully'),
-                  backgroundColor: AppColors.online));
-              } on FirebaseAuthException catch (e) {
-                if (!context.mounted) return;
-                String msg;
-                switch (e.code) {
-                  case 'wrong-password':
-                  case 'invalid-credential':
-                    msg = 'Current password is incorrect.';
-                    break;
-                  case 'weak-password':
-                    msg = 'New password is too weak.';
-                    break;
-                  case 'requires-recent-login':
-                    msg = 'Please sign out and sign in again, then try.';
-                    break;
-                  default:
-                    msg = e.message ?? 'Could not update password.';
-                }
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(msg), backgroundColor: Colors.red));
-              }
-            },
-            child: const Text('Update Password', style: TextStyle(fontWeight: FontWeight.bold)))),
-        ])));
+      builder: (_) => const _ChangePasswordSheet());
   }
 
   void _showVisibilitySheet(BuildContext context) {
@@ -403,144 +315,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _deleteAccountSheet(BuildContext context) {
-    final confirmCtrl = TextEditingController();
-    bool isDeleting = false;
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            title: const Text('Delete your account?',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'This will permanently:',
-                  style: TextStyle(fontSize: 14, color: Colors.black87),
-                ),
-                const SizedBox(height: 8),
-                _bullet('Delete your profile, posts, trips, and saved items'),
-                _bullet('Remove you from groups, chats, and events'),
-                _bullet('Anonymize any posts you made (shown as "[deleted user]")'),
-                _bullet('Revoke access to all data linked to this account'),
-                const SizedBox(height: 12),
-                const Text(
-                  'This cannot be undone.',
-                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Type DELETE to confirm:',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: confirmCtrl,
-                  decoration: InputDecoration(
-                    hintText: 'DELETE',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  ),
-                  onChanged: (_) => setDialogState(() {}),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: isDeleting ? null : () => Navigator.pop(ctx),
-                child: const Text('Cancel',
-                    style: TextStyle(color: AppColors.textSecondary)),
-              ),
-              ElevatedButton(
-                onPressed: (confirmCtrl.text.trim() == 'DELETE' && !isDeleting)
-                    ? () async {
-                        setDialogState(() => isDeleting = true);
-                        // GDPR audit trail: record the deletion request before
-                        // we actually delete (the auth user goes away on next line).
-                        final fbUser = FirebaseAuth.instance.currentUser;
-                        if (fbUser != null) {
-                          try {
-                            await FirebaseFirestore.instance
-                                .collection('gdpr_requests').add({
-                              'userId': fbUser.uid,
-                              'userName': fbUser.displayName ?? '',
-                              'userEmail': fbUser.email ?? '',
-                              'requestType': 'delete',
-                              'status': 'pending',
-                              'createdAt': FieldValue.serverTimestamp(),
-                              'notes': 'User-initiated via Settings → Delete Account',
-                            });
-                          } catch (_) {/* non-fatal */}
-                        }
-                        final ok = await context
-                            .read<AuthProvider>()
-                            .deleteAccount();
-                        if (!context.mounted) return;
-                        Navigator.pop(ctx);
-                        if (ok) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content:
-                                      Text('Your account has been deleted.')));
-                          context.go(AppRoutes.login);
-                        } else {
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content: Text(context
-                                    .read<AuthProvider>()
-                                    .error ??
-                                'Could not delete account.'),
-                            backgroundColor: Colors.red,
-                          ));
-                        }
-                      }
-                    : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                ),
-                child: isDeleting
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Text('Delete permanently'),
-              ),
-            ],
-          );
-        },
-      ),
+      builder: (_) => const _DeleteAccountDialog(),
     );
   }
 
-  Widget _bullet(String text) => Padding(
-        padding: const EdgeInsets.only(left: 4, top: 4),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('\u2022 ', style: TextStyle(color: Colors.black87)),
-          Expanded(
-            child: Text(text,
-                style: const TextStyle(fontSize: 13, color: Colors.black87, height: 1.4)),
-          ),
-        ]),
-      );
-
-  InputDecoration _inputDec(String hint) => InputDecoration(
-    hintText: hint, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.dark)));
 }
+
+// Shared helpers for the settings sheets/dialogs. Top-level so the extracted
+// sheet widgets (below) can reuse them alongside the screen itself.
+Widget _bullet(String text) => Padding(
+      padding: const EdgeInsets.only(left: 4, top: 4),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('\u2022 ', style: TextStyle(color: Colors.black87)),
+        Expanded(
+          child: Text(text,
+              style: const TextStyle(fontSize: 13, color: Colors.black87, height: 1.4)),
+        ),
+      ]),
+    );
+
+InputDecoration _inputDec(String hint) => InputDecoration(
+  hintText: hint, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
+  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.dark)));
 
 class _Section extends StatelessWidget {
   final String title; final List<Widget> children;
@@ -579,4 +380,256 @@ class _ToggleTile extends StatelessWidget {
     leading: Icon(icon, size: 22, color: AppColors.textPrimary),
     title: Text(label, style: const TextStyle(fontSize: 15)),
     trailing: CupertinoSwitch(value: value, activeTrackColor: AppColors.dark, onChanged: onChanged));
+}
+
+/// Change-password composer shown in a bottom sheet. Owns its three
+/// [TextEditingController]s so they are disposed when the sheet closes
+/// (a bare modal builder leaked them). Behavior is otherwise unchanged.
+class _ChangePasswordSheet extends StatefulWidget {
+  const _ChangePasswordSheet();
+
+  @override
+  State<_ChangePasswordSheet> createState() => _ChangePasswordSheetState();
+}
+
+class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
+  final TextEditingController _currentCtrl = TextEditingController();
+  final TextEditingController _newCtrl = TextEditingController();
+  final TextEditingController _confirmCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _currentCtrl.dispose();
+    _newCtrl.dispose();
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    // Capture the messenger up front so it survives the pop + awaits.
+    final messenger = ScaffoldMessenger.of(context);
+    final current = _currentCtrl.text;
+    final newPass = _newCtrl.text;
+    final confirm = _confirmCtrl.text;
+
+    // Validation
+    if (current.isEmpty || newPass.isEmpty || confirm.isEmpty) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Please fill in all fields'),
+        backgroundColor: Colors.red));
+      return;
+    }
+    if (newPass.length < 8) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('New password must be at least 8 characters'),
+        backgroundColor: Colors.red));
+      return;
+    }
+    if (newPass != confirm) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Passwords do not match'),
+        backgroundColor: Colors.red));
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.email == null) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Please sign in again to change your password.'),
+        backgroundColor: Colors.red));
+      return;
+    }
+
+    try {
+      // Re-authenticate with the current password (Firebase requirement
+      // for sensitive operations on sessions older than a few minutes).
+      final cred = EmailAuthProvider.credential(
+        email: user.email!,
+        password: current,
+      );
+      await user.reauthenticateWithCredential(cred);
+      await user.updatePassword(newPass);
+      if (!mounted) return;
+      Navigator.pop(context);
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Password updated successfully'),
+        backgroundColor: AppColors.online));
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      String msg;
+      switch (e.code) {
+        case 'wrong-password':
+        case 'invalid-credential':
+          msg = 'Current password is incorrect.';
+          break;
+        case 'weak-password':
+          msg = 'New password is too weak.';
+          break;
+        case 'requires-recent-login':
+          msg = 'Please sign out and sign in again, then try.';
+          break;
+        default:
+          msg = e.message ?? 'Could not update password.';
+      }
+      messenger.showSnackBar(SnackBar(
+        content: Text(msg), backgroundColor: Colors.red));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Change Password', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 20),
+        TextField(controller: _currentCtrl, obscureText: true,
+          decoration: _inputDec('Current password')),
+        const SizedBox(height: 12),
+        TextField(controller: _newCtrl, obscureText: true,
+          decoration: _inputDec('New password')),
+        const SizedBox(height: 12),
+        TextField(controller: _confirmCtrl, obscureText: true,
+          decoration: _inputDec('Confirm new password')),
+        const SizedBox(height: 20),
+        SizedBox(width: double.infinity, child: ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: AppColors.dark,
+            padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+          onPressed: _submit,
+          child: const Text('Update Password', style: TextStyle(fontWeight: FontWeight.bold)))),
+      ]));
+  }
+}
+
+/// Account-deletion confirmation dialog. Owns its confirm-text controller and
+/// the in-flight flag, replacing a [StatefulBuilder] that could not dispose
+/// the controller. Behavior (type-DELETE gating, GDPR log, delete flow) is
+/// preserved.
+class _DeleteAccountDialog extends StatefulWidget {
+  const _DeleteAccountDialog();
+
+  @override
+  State<_DeleteAccountDialog> createState() => _DeleteAccountDialogState();
+}
+
+class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
+  final TextEditingController _confirmCtrl = TextEditingController();
+  bool _isDeleting = false;
+
+  @override
+  void dispose() {
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _confirmDelete() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final router = GoRouter.of(context);
+    final auth = context.read<AuthProvider>();
+    setState(() => _isDeleting = true);
+    // GDPR audit trail: record the deletion request before
+    // we actually delete (the auth user goes away on next line).
+    final fbUser = FirebaseAuth.instance.currentUser;
+    if (fbUser != null) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('gdpr_requests').add({
+          'userId': fbUser.uid,
+          'userName': fbUser.displayName ?? '',
+          'userEmail': fbUser.email ?? '',
+          'requestType': 'delete',
+          'status': 'pending',
+          'createdAt': FieldValue.serverTimestamp(),
+          'notes': 'User-initiated via Settings → Delete Account',
+        });
+      } catch (_) {/* non-fatal */}
+    }
+    final ok = await auth.deleteAccount();
+    if (!mounted) return;
+    Navigator.pop(context);
+    if (ok) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Your account has been deleted.')));
+      router.go(AppRoutes.login);
+    } else {
+      messenger.showSnackBar(SnackBar(
+        content: Text(auth.error ?? 'Could not delete account.'),
+        backgroundColor: Colors.red,
+      ));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      title: const Text('Delete your account?',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'This will permanently:',
+            style: TextStyle(fontSize: 14, color: Colors.black87),
+          ),
+          const SizedBox(height: 8),
+          _bullet('Delete your profile, posts, trips, and saved items'),
+          _bullet('Remove you from groups, chats, and events'),
+          _bullet('Anonymize any posts you made (shown as "[deleted user]")'),
+          _bullet('Revoke access to all data linked to this account'),
+          const SizedBox(height: 12),
+          const Text(
+            'This cannot be undone.',
+            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Type DELETE to confirm:',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _confirmCtrl,
+            decoration: InputDecoration(
+              hintText: 'DELETE',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isDeleting ? null : () => Navigator.pop(context),
+          child: const Text('Cancel',
+              style: TextStyle(color: AppColors.textSecondary)),
+        ),
+        ElevatedButton(
+          onPressed: (_confirmCtrl.text.trim() == 'DELETE' && !_isDeleting)
+              ? _confirmDelete
+              : null,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8)),
+          ),
+          child: _isDeleting
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white),
+                )
+              : const Text('Delete permanently'),
+        ),
+      ],
+    );
+  }
 }

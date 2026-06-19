@@ -96,9 +96,11 @@ class AuthProvider extends ChangeNotifier {
   bool get isLoggedIn => isMock ? _currentUser != null : _auth.currentUser != null;
   String get userRole => _currentUser?.role ?? 'user';
 
+  StreamSubscription<User?>? _authSub;
+
   AuthProvider({this.isMock = false}) {
     if (!isMock) {
-      _auth.authStateChanges().listen((user) async {
+      _authSub = _auth.authStateChanges().listen((user) async {
         if (user != null) {
           await _fetchUser(user.uid);
         } else {
@@ -107,6 +109,12 @@ class AuthProvider extends ChangeNotifier {
         notifyListeners();
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _fetchUser(String uid) async {
@@ -551,6 +559,17 @@ class UserProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Match preferences live under users/{uid}.matchPrefs (a nested map) so they
+  /// sync across devices. The `matchPrefs` key is whitelisted in firestore.rules.
+  Future<Map<String, dynamic>> getMatchPrefs(String uid) async {
+    if (isMock) return {};
+    final doc = await _db.collection('users').doc(uid).get();
+    return (doc.data()?['matchPrefs'] as Map<String, dynamic>?) ?? {};
+  }
+
+  Future<void> saveMatchPrefs(String uid, Map<String, dynamic> prefs) =>
+      updateProfile(uid, {'matchPrefs': prefs});
+
   Future<void> followUser(String targetUid) async {
     if (isMock) { _following.add(targetUid); notifyListeners(); return; }
     final uid = _currentUser?.uid;
@@ -596,7 +615,7 @@ class PostProvider extends ChangeNotifier {
   List<PostModel> _feed = [];
   final Set<String> _liked = {};
   final Set<String> _saved = {};
-  bool _loading = false;
+  final bool _loading = false;
   String? _feedError;
   AuthProvider? _storedAuth;
 
@@ -697,7 +716,9 @@ class PostProvider extends ChangeNotifier {
     if (_uid == null) return;
     await _db.collection('posts').doc(postId).collection('likes').doc(_uid).set({'likedAt': Timestamp.now()});
     await _db.collection('posts').doc(postId).update({'likeCount': FieldValue.increment(1)});
-    notifyListeners();
+    // No notifyListeners(): the card toggles optimistically and the feed
+    // snapshot reflects the new likeCount on its own. Notifying here would
+    // rebuild every feed card redundantly.
   }
 
   Future<void> unlikePost(String postId) async {
@@ -716,7 +737,8 @@ class PostProvider extends ChangeNotifier {
     if (_uid == null) return;
     await _db.collection('posts').doc(postId).collection('likes').doc(_uid).delete();
     await _db.collection('posts').doc(postId).update({'likeCount': FieldValue.increment(-1)});
-    notifyListeners();
+    // No notifyListeners(): see likePost — the card and feed snapshot already
+    // cover this; an extra notify just rebuilds the whole feed.
   }
 
   Future<bool> isLiked(String postId) async {
@@ -756,7 +778,8 @@ class PostProvider extends ChangeNotifier {
   }
 
   Stream<List<CommentModel>> watchComments(String postId) {
-    if (isMock) return Stream.value([
+    if (isMock) {
+      return Stream.value([
       CommentModel(id: 'c1', postId: postId, authorId: 'user_002',
         authorName: 'Maria Chen', text: 'This is amazing! 🔥',
         createdAt: DateTime.now().subtract(const Duration(minutes: 30))),
@@ -764,6 +787,7 @@ class PostProvider extends ChangeNotifier {
         authorName: 'James Wright', text: 'So inspiring! Congrats 🎉',
         createdAt: DateTime.now().subtract(const Duration(minutes: 15))),
     ]);
+    }
     return _db.collection('posts').doc(postId).collection('comments')
         .orderBy('createdAt')
         .snapshots()
@@ -1255,8 +1279,30 @@ class MatchProvider extends ChangeNotifier {
     if (isMock) { _candidates = List.from(mockUsers); notifyListeners(); return; }
     if (_uid == null) return;
     _loading = true; notifyListeners();
-    final snap = await _db.collection('users').where('role', isEqualTo: 'user').limit(20).get();
-    _candidates = snap.docs.map((d) => UserModel.fromFirestore(d)).where((u) => u.uid != _uid).toList();
+
+    // Honor the filters set on the Match Preferences screen
+    // (users/{uid}.matchPrefs). Age/distance are persisted there too but can't
+    // be applied yet — UserModel carries no DOB or geo — so those stay a
+    // follow-up once that data exists. We over-fetch (50) since filtering thins
+    // the pool client-side.
+    final meDoc = await _db.collection('users').doc(_uid).get();
+    final me = meDoc.data() ?? const <String, dynamic>{};
+    final prefs = (me['matchPrefs'] as Map<String, dynamic>?) ?? const {};
+    final myAirline = me['airline'] as String?;
+    final verifiedOnly = prefs['verifiedOnly'] == true;
+    final sameAirline = prefs['sameAirline'] == true;
+    final airlines = List<String>.from(prefs['airlines'] ?? const <String>[]);
+    final positions = List<String>.from(prefs['positions'] ?? const <String>[]);
+
+    final snap = await _db.collection('users').where('role', isEqualTo: 'user').limit(50).get();
+    _candidates = snap.docs
+        .map((d) => UserModel.fromFirestore(d))
+        .where((u) => u.uid != _uid)
+        .where((u) => !verifiedOnly || u.isVerified)
+        .where((u) => !sameAirline || (myAirline != null && u.airline == myAirline))
+        .where((u) => airlines.isEmpty || (u.airline != null && airlines.contains(u.airline)))
+        .where((u) => positions.isEmpty || (u.position != null && positions.contains(u.position)))
+        .toList();
     _loading = false; notifyListeners();
   }
 

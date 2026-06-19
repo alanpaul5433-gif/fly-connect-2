@@ -11,6 +11,7 @@ import '../../shared/providers/event_provider.dart';
 import '../../shared/providers/auth_provider.dart';
 import '../../shared/models/models.dart';
 import '../home/main_shell.dart' show AppDrawer;
+import '../../shared/widgets/cached_image.dart';
 
 class EventsScreen extends StatefulWidget {
   const EventsScreen({super.key});
@@ -175,8 +176,8 @@ class _FeaturedCard extends StatelessWidget {
         ClipRRect(borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
           child: Stack(children: [
             event.imageUrl != null
-              ? Image.network(event.imageUrl!, height: 130, width: double.infinity, fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(height: 130, color: AppColors.backgroundGrey))
+              ? CachedFeedImage(url: event.imageUrl!, height: 130, width: double.infinity, fit: BoxFit.cover,
+                  errorWidget: Container(height: 130, color: AppColors.backgroundGrey))
               : Container(height: 130, color: AppColors.dark,
                   child: const Center(child: Icon(Icons.event, color: AppColors.primary, size: 40))),
             Container(height: 130, decoration: BoxDecoration(
@@ -213,8 +214,8 @@ class _EventListTile extends StatelessWidget {
       child: Row(children: [
         ClipRRect(borderRadius: BorderRadius.circular(10),
           child: event.imageUrl != null
-            ? Image.network(event.imageUrl!, width: 70, height: 70, fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(width: 70, height: 70, color: AppColors.backgroundGrey,
+            ? CachedFeedImage(url: event.imageUrl!, width: 70, height: 70, fit: BoxFit.cover,
+                errorWidget: Container(width: 70, height: 70, color: AppColors.backgroundGrey,
                   child: const Icon(Icons.event, color: AppColors.textSecondary)))
             : Container(width: 70, height: 70, color: AppColors.dark,
                 child: const Center(child: Icon(Icons.event, color: AppColors.primary)))),

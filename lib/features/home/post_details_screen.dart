@@ -6,6 +6,7 @@ import '../../core/constants/app_colors.dart';
 import '../../shared/providers/post_provider.dart';
 import '../../shared/providers/auth_provider.dart';
 import '../../shared/models/models.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class PostDetailsScreen extends StatefulWidget {
   final PostModel post;
@@ -51,6 +52,12 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
     _checkSaved();
   }
 
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _checkLike() async {
     final liked = await context.read<PostProvider>().isLiked(widget.post.id);
     if (mounted) setState(() => _isLiked = liked);
@@ -92,28 +99,28 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
         Expanded(child: CustomScrollView(slivers: [
           SliverToBoxAdapter(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             ListTile(
-              leading: CircleAvatar(
-                backgroundImage: widget.post.authorPhotoUrl != null ? NetworkImage(widget.post.authorPhotoUrl!) : null,
+              leading: CachedAvatar(
+                url: widget.post.authorPhotoUrl,
+                radius: 20,
                 backgroundColor: AppColors.dark,
-                child: widget.post.authorPhotoUrl == null ? Text(widget.post.authorName.isNotEmpty ? widget.post.authorName[0] : '?', style: const TextStyle(color: Colors.white)) : null),
+                fallback: Text(widget.post.authorName.isNotEmpty ? widget.post.authorName[0] : '?', style: const TextStyle(color: Colors.white)),
+              ),
               title: Text(widget.post.authorName, style: const TextStyle(fontWeight: FontWeight.w600)),
               subtitle: Text(timeago.format(widget.post.createdAt)),
             ),
             if (widget.post.mediaUrls.isNotEmpty)
-              Image.network(
-                widget.post.mediaUrls.first,
+              CachedFeedImage(
+                url: widget.post.mediaUrls.first,
                 width: double.infinity,
                 height: 300,
                 fit: BoxFit.cover,
-                loadingBuilder: (_, child, progress) => progress == null
-                    ? child
-                    : Container(
-                        height: 300,
-                        color: AppColors.backgroundGrey,
-                        child: const Center(
-                            child: CircularProgressIndicator(
-                                color: AppColors.primary, strokeWidth: 2))),
-                errorBuilder: (_, __, ___) => Container(
+                placeholder: Container(
+                    height: 300,
+                    color: AppColors.backgroundGrey,
+                    child: const Center(
+                        child: CircularProgressIndicator(
+                            color: AppColors.primary, strokeWidth: 2))),
+                errorWidget: Container(
                     height: 300,
                     color: AppColors.backgroundGrey,
                     child: const Icon(Icons.image_not_supported_outlined,
@@ -157,10 +164,12 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
                 (context, i) {
                   final c = comments[i];
                   return ListTile(
-                    leading: CircleAvatar(radius: 16,
-                      backgroundImage: c.authorPhotoUrl != null ? NetworkImage(c.authorPhotoUrl!) : null,
+                    leading: CachedAvatar(
+                      url: c.authorPhotoUrl,
+                      radius: 16,
                       backgroundColor: AppColors.dark,
-                      child: c.authorPhotoUrl == null ? Text(c.authorName.isNotEmpty ? c.authorName[0] : '?', style: const TextStyle(color: Colors.white, fontSize: 12)) : null),
+                      fallback: Text(c.authorName.isNotEmpty ? c.authorName[0] : '?', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                    ),
                     title: RichText(text: TextSpan(style: const TextStyle(color: Colors.black, fontSize: 13), children: [
                       TextSpan(text: '${c.authorName} ', style: const TextStyle(fontWeight: FontWeight.bold)),
                       TextSpan(text: c.text),

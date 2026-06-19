@@ -77,6 +77,42 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:361504801284:android:7b9682e73d98c7fbc0ab51",
+        "android_client_info": {
+          "package_name": "com.urbansyncinnovations.flyconnect"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "361504801284-kft6aqt6bgc9dil4r3u3nqsfss4m4h71.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAViMZd_Vv4rrFjO5r_Jbd3wogHAOlOUzo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "361504801284-kft6aqt6bgc9dil4r3u3nqsfss4m4h71.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "361504801284-6g6j57f44uus511lre2noo6t4ubspc79.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.flyconnect.app"
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"

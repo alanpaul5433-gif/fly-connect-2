@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
+import 'cached_image.dart';
 
 // ── Primary Button ──────────────────────────────────────────────────────────
 class PrimaryButton extends StatelessWidget {
@@ -291,13 +292,11 @@ class UserAvatar extends StatelessWidget {
                     ? Border.all(color: AppColors.error, width: 2)
                     : Border.all(color: Colors.transparent, width: 0),
           ),
-          child: CircleAvatar(
+          child: CachedAvatar(
+            url: imageUrl,
             radius: radius,
             backgroundColor: AppColors.backgroundGrey,
-            backgroundImage: imageUrl != null ? NetworkImage(imageUrl!) : null,
-            child: imageUrl == null
-                ? Icon(Icons.person, size: radius, color: AppColors.textSecondary)
-                : null,
+            fallback: Icon(Icons.person, size: radius, color: AppColors.textSecondary),
           ),
         ),
         if (isOnline)

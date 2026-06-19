@@ -24,7 +24,7 @@ val isAssemblingRelease = gradle.startParameter.taskNames.any { it.contains("Rel
 val allowInsecureRelease = (project.findProperty("allowInsecureRelease") as String?) == "true"
 
 android {
-    namespace = "com.appcurb.flyconnect"
+    namespace = "com.urbansyncinnovations.flyconnect"
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
@@ -38,8 +38,8 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.appcurb.flyconnect"
-        minSdk = flutter.minSdkVersion            // Firebase Auth requires 23+
+        applicationId = "com.urbansyncinnovations.flyconnect"
+        minSdk = 23                               // Firebase Auth requires 23+ (pinned, not the Flutter default)
         targetSdk = 35         // Google Play requires API 35 for new uploads (since Aug 2025)
         versionCode = flutter.versionCode
         versionName = flutter.versionName

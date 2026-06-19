@@ -6,6 +6,7 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/models/models.dart';
 import '../../shared/providers/providers.dart';
+import '../../shared/widgets/cached_image.dart';
 
 /// Crew-facing offers browser. Shows business promotions to all users
 /// without the create/manage UI that PromotionsScreen exposes to businesses.
@@ -153,12 +154,12 @@ class _OfferCard extends StatelessWidget {
             ClipRRect(
               borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
               child: promo.imageUrl != null
-                  ? Image.network(
-                      promo.imageUrl!,
+                  ? CachedFeedImage(
+                      url: promo.imageUrl!,
                       height: 140,
                       width: double.infinity,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _placeholderImage(),
+                      errorWidget: _placeholderImage(),
                     )
                   : _placeholderImage(),
             ),
