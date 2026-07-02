@@ -47,14 +47,11 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
-            <!-- Deep links: https://flyconnect.app/* -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="https"
-                    android:host="flyconnect.app"/>
-            </intent-filter>
+            <!-- Deep links (App Links) intentionally omitted for v1.0. The app does not
+                 yet consume inbound links, and flyconnect.app had no DNS/host, so an
+                 autoVerify filter only produced a Play Console "Failed domain checks"
+                 warning with no user benefit. Re-add a path-scoped, verified https
+                 intent-filter once real deep linking is wired. See docs/deep-links/. -->
 
             <!-- Custom scheme for OAuth redirects and shortcuts -->
             <intent-filter>

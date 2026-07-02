@@ -153,7 +153,7 @@ class _PromotionCard extends StatelessWidget {
             const SizedBox(width: 10),
             ElevatedButton(
               onPressed: () {
-                final link = 'https://flyconnect.app/promotions/${promo.id}';
+                final link = 'https://flyconnect.co/promotions/${promo.id}';
                 Clipboard.setData(ClipboardData(text: link));
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                   content: Text('Promotion link copied to clipboard'),

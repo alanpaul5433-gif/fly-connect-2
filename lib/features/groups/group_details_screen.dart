@@ -105,7 +105,7 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
             title: const Text('Share group'),
             onTap: () {
               Navigator.pop(context);
-              final link = 'https://flyconnect.app/groups/${g.id}';
+              final link = 'https://flyconnect.co/groups/${g.id}';
               Clipboard.setData(ClipboardData(text: link));
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                 content: Text('Group link copied to clipboard'),
@@ -118,7 +118,7 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
             title: const Text('Copy link'),
             onTap: () {
               Navigator.pop(context);
-              final link = 'https://flyconnect.app/groups/${g.id}';
+              final link = 'https://flyconnect.co/groups/${g.id}';
               Clipboard.setData(ClipboardData(text: link));
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                 content: Text('Group link copied to clipboard'),

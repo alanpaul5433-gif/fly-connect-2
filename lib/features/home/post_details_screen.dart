@@ -21,7 +21,7 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
   int _likeCount = 0;
 
   void _sharePost() {
-    final link = 'https://flyconnect.app/posts/${widget.post.id}';
+    final link = 'https://flyconnect.co/posts/${widget.post.id}';
     Clipboard.setData(ClipboardData(text: link));
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
       content: Text('Post link copied to clipboard'),

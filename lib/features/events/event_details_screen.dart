@@ -100,7 +100,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             IconButton(
               icon: const Icon(Icons.share_outlined, color: Colors.white),
               onPressed: () {
-                final link = 'https://flyconnect.app/events/${e.id}';
+                final link = 'https://flyconnect.co/events/${e.id}';
                 Clipboard.setData(ClipboardData(text: link));
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                   content: Text('Event link copied to clipboard'),

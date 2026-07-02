@@ -577,7 +577,7 @@ class _PostCardState extends State<_PostCard> {
   }
 
   void _copyPostLink() {
-    final link = 'https://flyconnect.app/posts/${widget.post.id}';
+    final link = 'https://flyconnect.co/posts/${widget.post.id}';
     Clipboard.setData(ClipboardData(text: link));
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
       content: Text('Post link copied to clipboard'),
