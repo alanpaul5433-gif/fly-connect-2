@@ -21,6 +21,7 @@ import 'post_details_screen.dart';
 import 'story_viewer_screen.dart';
 import 'main_shell.dart' show AppDrawer;
 import '../../shared/widgets/cached_image.dart';
+import '../../shared/widgets/feed_video.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -651,7 +652,17 @@ class _PostCardState extends State<_PostCard> {
       GestureDetector(
         onDoubleTap: _toggleLike,
         onTap: _openPost,
-        child: p.mediaUrls.isNotEmpty
+        child: (p.mediaType == 'video' && p.mediaUrls.isNotEmpty)
+            ? RepaintBoundary(
+                child: FeedVideo(
+                  videoUrl: p.mediaUrls.first,
+                  thumbnailUrl: p.thumbnailUrl,
+                  aspectRatio: p.aspectRatio,
+                  height: 280,
+                  width: double.infinity,
+                ),
+              )
+            : p.mediaUrls.isNotEmpty
             ? ClipRRect(
                 borderRadius: BorderRadius.zero,
                 child: RepaintBoundary(

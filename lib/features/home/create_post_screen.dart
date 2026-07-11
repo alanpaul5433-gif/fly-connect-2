@@ -1,6 +1,9 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:video_player/video_player.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
@@ -17,28 +20,150 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final _captionController = TextEditingController();
   final _locationController = TextEditingController();
   Uint8List? _imageBytes;
+  XFile? _videoFile;
+  String _mediaType = 'text'; // 'text' | 'image' | 'video'
+  VideoPlayerController? _videoPreview;
   String _audience = 'Everyone';
   String? _selectedGroupId;
   String? _selectedGroupName;
   bool _loading = false;
 
-  Future<void> _pickFromGallery() async {
+  Future<void> _pickImage(ImageSource source) async {
     final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery);
-    if (picked != null) {
-      final bytes = await picked.readAsBytes();
-      setState(() => _imageBytes = bytes);
+    final picked = await picker.pickImage(source: source);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    await _disposePreview();
+    if (!mounted) return;
+    setState(() {
+      _imageBytes = bytes;
+      _videoFile = null;
+      _mediaType = 'image';
+    });
+  }
+
+  Future<void> _pickVideo(ImageSource source) async {
+    final picker = ImagePicker();
+    // Cap length so uploads stay within the Storage size rule (video <100 MB).
+    final picked = await picker.pickVideo(source: source, maxDuration: const Duration(seconds: 60));
+    if (picked == null) return;
+    final controller = VideoPlayerController.file(File(picked.path));
+    try {
+      await controller.initialize();
+      await controller.setLooping(true);
+      await controller.setVolume(0);
+    } catch (_) {
+      await controller.dispose();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not load that video.')));
+      }
+      return;
     }
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
+    await _disposePreview();
+    setState(() {
+      _videoFile = picked;
+      _imageBytes = null;
+      _mediaType = 'video';
+      _videoPreview = controller;
+    });
+    controller.play();
+  }
+
+  void _showVideoSourceSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          ListTile(
+            leading: const Icon(Icons.videocam_outlined, color: AppColors.dark),
+            title: const Text('Record a video'),
+            onTap: () { Navigator.pop(ctx); _pickVideo(ImageSource.camera); }),
+          ListTile(
+            leading: const Icon(Icons.video_library_outlined, color: AppColors.dark),
+            title: const Text('Choose from gallery'),
+            onTap: () { Navigator.pop(ctx); _pickVideo(ImageSource.gallery); }),
+          const SizedBox(height: 8),
+        ])),
+    );
+  }
+
+  Future<void> _disposePreview() async {
+    final p = _videoPreview;
+    _videoPreview = null;
+    await p?.dispose();
+  }
+
+  void _clearMedia() {
+    _disposePreview();
+    setState(() {
+      _imageBytes = null;
+      _videoFile = null;
+      _mediaType = 'text';
+    });
   }
 
   Future<void> _post() async {
-    if (_captionController.text.trim().isEmpty && _imageBytes == null) return;
+    final hasMedia = _imageBytes != null || _videoFile != null;
+    if (_captionController.text.trim().isEmpty && !hasMedia) return;
     setState(() => _loading = true);
 
     final provider = context.read<PostProvider>();
+    final location = _locationController.text.trim().isEmpty
+        ? null
+        : _locationController.text.trim();
+    final caption = _captionController.text.trim();
 
     try {
-      // Upload image to Firebase Storage if present
+      // ── Video post ──────────────────────────────────────────
+      if (_mediaType == 'video' && _videoFile != null) {
+        final videoBytes = await _videoFile!.readAsBytes();
+        final ext = _videoFile!.path.toLowerCase().endsWith('.mov') ? 'mov' : 'mp4';
+        // Generate a poster frame (best-effort; feed falls back gracefully).
+        Uint8List? thumb;
+        try {
+          thumb = await VideoThumbnail.thumbnailData(
+            video: _videoFile!.path,
+            imageFormat: ImageFormat.JPEG,
+            maxWidth: 720,
+            quality: 75,
+          );
+        } catch (_) {/* poster is optional */}
+
+        final res = await provider.uploadPostVideo(
+          videoBytes: videoBytes, ext: ext, thumbnailBytes: thumb);
+        if (res == null || res['videoUrl'] == null) {
+          if (!mounted) return;
+          setState(() => _loading = false);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Video upload failed. Please try again.'),
+            backgroundColor: Colors.red));
+          return;
+        }
+        await provider.createPost(
+          caption: caption,
+          mediaUrls: [res['videoUrl']!],
+          mediaType: 'video',
+          thumbnailUrl: res['thumbnailUrl'],
+          aspectRatio: _videoPreview?.value.aspectRatio,
+          durationMs: _videoPreview?.value.duration.inMilliseconds,
+          location: location,
+          groupId: _selectedGroupId,
+          audience: _audience,
+        );
+        if (mounted) Navigator.pop(context);
+        return;
+      }
+
+      // ── Image / text post ───────────────────────────────────
       List<String> mediaUrls = const [];
       if (_imageBytes != null) {
         final url = await provider.uploadPostImage(_imageBytes!);
@@ -53,12 +178,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       }
 
       await provider.createPost(
-        caption: _captionController.text.trim(),
+        caption: caption,
         mediaUrls: mediaUrls,
         mediaType: mediaUrls.isNotEmpty ? 'image' : 'text',
-        location: _locationController.text.trim().isEmpty
-            ? null
-            : _locationController.text.trim(),
+        location: location,
         groupId: _selectedGroupId,
         audience: _audience,
       );
@@ -275,8 +398,18 @@ final user = context.watch<AuthProvider>().currentUser;
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          // Image or empty state
-                          if (_imageBytes != null)
+                          // Video preview / image / empty state
+                          if (_mediaType == 'video' && _videoPreview != null && _videoPreview!.value.isInitialized)
+                            FittedBox(
+                              fit: BoxFit.cover,
+                              clipBehavior: Clip.hardEdge,
+                              child: SizedBox(
+                                width: _videoPreview!.value.size.width,
+                                height: _videoPreview!.value.size.height,
+                                child: VideoPlayer(_videoPreview!),
+                              ),
+                            )
+                          else if (_imageBytes != null)
                             Image.memory(_imageBytes!, fit: BoxFit.cover)
                           else
                             const Center(
@@ -318,26 +451,22 @@ final user = context.watch<AuthProvider>().currentUser;
                                   _MediaButton(
                                     icon: Icons.photo_library_outlined,
                                     label: 'Gallery',
-                                    onTap: _pickFromGallery,
+                                    onTap: () => _pickImage(ImageSource.gallery),
                                   ),
                                   _MediaButton(
                                     icon: Icons.camera_alt_outlined,
                                     label: 'Camera',
-                                    onTap: () async {
-                                      final picker = ImagePicker();
-                                      final picked = await picker.pickImage(
-                                          source: ImageSource.camera);
-                                      if (picked != null) {
-                                        final bytes = await picked.readAsBytes();
-                                        setState(() => _imageBytes = bytes);
-                                      }
-                                    },
+                                    onTap: () => _pickImage(ImageSource.camera),
+                                  ),
+                                  _MediaButton(
+                                    icon: Icons.videocam_outlined,
+                                    label: 'Video',
+                                    onTap: _showVideoSourceSheet,
                                   ),
                                   _MediaButton(
                                     icon: Icons.format_list_bulleted,
                                     label: 'Text only',
-                                    onTap: () =>
-                                        setState(() => _imageBytes = null),
+                                    onTap: _clearMedia,
                                   ),
                                 ],
                               ),
@@ -420,6 +549,7 @@ final user = context.watch<AuthProvider>().currentUser;
   void dispose() {
     _captionController.dispose();
     _locationController.dispose();
+    _videoPreview?.dispose();
     super.dispose();
   }
 }

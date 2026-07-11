@@ -50,6 +50,12 @@ dependencies:
   uuid: ^4.3.3
   timeago: ^3.6.1
   url_launcher: ^6.2.5
+  share_plus: ^12.0.2
+  qr_flutter: ^4.1.0
+  video_player: ^2.11.1
+  chewie: ^1.13.1
+  video_thumbnail: ^0.5.6
+  visibility_detector: ^0.4.0+2
 
 dev_dependencies:
   flutter_test:
@@ -72,8 +78,10 @@ flutter_launcher_icons:
   ios: true
   remove_alpha_ios: true
   min_sdk_android: 21
-  adaptive_icon_background: "#1A1D27"
-  adaptive_icon_foreground: "assets/images/app_icon.png"
+  # Icon artwork is black-backed; match the adaptive background to avoid a seam.
+  # Foreground is a padded variant so the circle/squircle mask doesn't clip the wordmark.
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "assets/images/app_icon_adaptive_fg.png"
   web:
     generate: true
     image_path: "assets/images/app_icon.png"
@@ -87,11 +95,13 @@ flutter_launcher_icons:
 # ── Native splash screen ────────────────────────────────────────
 # Run: dart run flutter_native_splash:create
 flutter_native_splash:
-  color: "#1A1D27"
+  color: "#000000"
   image: "assets/images/app_icon.png"
+  # Android 12+ masks the splash image to a circle (content must fit the center
+  # ~2/3). Use a padded 1152x1152 source so the "FLYCONNECT" wordmark isn't clipped.
   android_12:
-    color: "#1A1D27"
-    image: "assets/images/app_icon.png"
+    color: "#000000"
+    image: "assets/images/app_icon_splash.png"
   ios: true
   web: false
 

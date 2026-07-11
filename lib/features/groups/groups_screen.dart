@@ -14,14 +14,18 @@ class GroupsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Group creation is restricted to business (and admin) accounts.
+    final role = context.watch<AuthProvider>().userRole;
+    final canCreate = role == 'business' || role == 'admin';
     return DefaultTabController(length: 2, child: Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white, elevation: 0,
         title: const Text('Groups', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
         actions: [
-          IconButton(icon: const Icon(Icons.add, color: Colors.black),
-            onPressed: () => context.push(AppRoutes.createGroup)),
+          if (canCreate)
+            IconButton(icon: const Icon(Icons.add, color: Colors.black),
+              onPressed: () => context.push(AppRoutes.createGroup)),
         ],
         bottom: const TabBar(
           labelColor: AppColors.dark,
@@ -32,14 +36,14 @@ class GroupsScreen extends StatelessWidget {
       ),
       body: Consumer<GroupProvider>(
         builder: (context, provider, _) => TabBarView(children: [
-          _groupsList(context, provider.groups, provider, discover: true),
-          _groupsList(context, provider.myGroups, provider, discover: false),
+          _groupsList(context, provider.groups, provider, discover: true, canCreate: canCreate),
+          _groupsList(context, provider.myGroups, provider, discover: false, canCreate: canCreate),
         ]),
       ),
     ));
   }
 
-  Widget _groupsList(BuildContext context, List<GroupModel> groups, GroupProvider provider, {required bool discover}) {
+  Widget _groupsList(BuildContext context, List<GroupModel> groups, GroupProvider provider, {required bool discover, required bool canCreate}) {
     if (groups.isEmpty) {
       return EmptyState(
         icon: Icons.group_outlined,
@@ -47,8 +51,8 @@ class GroupsScreen extends StatelessWidget {
         subtitle: discover
             ? 'Start your own crew community.'
             : 'Discover groups from your airline or city to join.',
-        actionLabel: discover ? 'Create Group' : 'Discover Groups',
-        onAction: () {
+        actionLabel: discover ? (canCreate ? 'Create Group' : null) : 'Discover Groups',
+        onAction: (discover && !canCreate) ? null : () {
           if (discover) {
             context.push(AppRoutes.createGroup);
           } else {

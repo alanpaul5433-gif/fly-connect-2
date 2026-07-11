@@ -7,6 +7,7 @@ import '../../shared/providers/post_provider.dart';
 import '../../shared/providers/auth_provider.dart';
 import '../../shared/models/models.dart';
 import '../../shared/widgets/cached_image.dart';
+import '../../shared/widgets/feed_video.dart';
 
 class PostDetailsScreen extends StatefulWidget {
   final PostModel post;
@@ -108,7 +109,15 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
               title: Text(widget.post.authorName, style: const TextStyle(fontWeight: FontWeight.w600)),
               subtitle: Text(timeago.format(widget.post.createdAt)),
             ),
-            if (widget.post.mediaUrls.isNotEmpty)
+            if (widget.post.mediaType == 'video' && widget.post.mediaUrls.isNotEmpty)
+              FeedVideo(
+                videoUrl: widget.post.mediaUrls.first,
+                thumbnailUrl: widget.post.thumbnailUrl,
+                aspectRatio: widget.post.aspectRatio,
+                width: double.infinity,
+                height: 300,
+              )
+            else if (widget.post.mediaUrls.isNotEmpty)
               CachedFeedImage(
                 url: widget.post.mediaUrls.first,
                 width: double.infinity,

@@ -44,9 +44,11 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Firebase — iOS plist / generated Dart options often stay machine-local
+# Firebase — iOS plist stays machine-local (native build reads it directly).
+# firebase_options.dart is the committed FlutterFire source of truth: main.dart
+# / main_admin.dart import it, so it must be tracked or clean checkouts & CI
+# fail to compile. The keys it holds are public project identifiers, not secrets.
 ios/Runner/GoogleService-Info.plist
-lib/firebase_options.dart
 
 # Local Claude Code settings
 .claude/

@@ -27,6 +27,9 @@ service firebase.storage {
     function isImage() {
       return request.resource.contentType.matches('image/.*');
     }
+    function isVideo() {
+      return request.resource.contentType.matches('video/.*');
+    }
     function underSize(maxMb) {
       return request.resource.size < maxMb * 1024 * 1024;
     }
@@ -47,7 +50,11 @@ service firebase.storage {
     // Path: user_uploads/{uid}/posts/{file}
     match /user_uploads/{uid}/{folder}/{file=**} {
       allow read: if isSignedIn();
-      allow create: if isOwner(uid) && isImage() && underSize(10);
+      // Photos + poster thumbnails up to 10 MB; videos (60s clips) up to 100 MB.
+      allow create: if isOwner(uid) && (
+        (isImage() && underSize(10)) ||
+        (isVideo() && underSize(100))
+      );
       allow update, delete: if isOwner(uid) || isAdmin();
     }
 

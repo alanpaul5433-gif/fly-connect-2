@@ -24,9 +24,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:provider/provider.dart';
-import 'core/config/firebase_config.dart';
 import 'core/theme/app_theme.dart';
 import 'core/utils/admin_router.dart';
+import 'firebase_options.dart';
 import 'shared/providers/real_providers.dart';
 import 'shared/widgets/error_boundary.dart';
 
@@ -35,7 +35,7 @@ Future<void> main() async {
     WidgetsFlutterBinding.ensureInitialized();
     ErrorBoundary.install();
     await Firebase.initializeApp(
-      options: FirebaseConfig.currentPlatformOptions,
+      options: DefaultFirebaseOptions.currentPlatform,
     );
 
     if (!kIsWeb) {

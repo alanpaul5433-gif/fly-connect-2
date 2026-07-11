@@ -41,6 +41,12 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         backgroundColor: Colors.red));
       return;
     }
+    if (auth.userRole != 'business' && auth.userRole != 'admin') {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Only business accounts can create groups.'),
+        backgroundColor: Colors.red));
+      return;
+    }
     setState(() => _loading = true);
     final tagsRaw = _tagsCtrl.text.trim();
     final tags = tagsRaw.isEmpty

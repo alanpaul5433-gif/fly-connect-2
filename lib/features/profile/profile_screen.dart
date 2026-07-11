@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../core/constants/app_routes.dart';
@@ -415,14 +418,79 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
         if (isMe) ...[
-          ListTile(leading: const Icon(Icons.qr_code), title: const Text('Share profile'), onTap: () => Navigator.pop(context)),
+          ListTile(leading: const Icon(Icons.share_outlined), title: const Text('Share profile'), onTap: () { Navigator.pop(context); _shareProfile(); }),
+          ListTile(leading: const Icon(Icons.qr_code), title: const Text('My QR code'), onTap: () { Navigator.pop(context); _showMyQr(); }),
           ListTile(leading: const Icon(Icons.lock_outline), title: const Text('Privacy settings'), onTap: () { Navigator.pop(context); context.push(AppRoutes.settings); }),
         ] else ...[
-          ListTile(leading: const Icon(Icons.share_outlined), title: const Text('Share profile'), onTap: () => Navigator.pop(context)),
+          ListTile(leading: const Icon(Icons.share_outlined), title: const Text('Share profile'), onTap: () { Navigator.pop(context); _shareProfile(); }),
           ListTile(leading: const Icon(Icons.block, color: Colors.red), title: const Text('Block user', style: TextStyle(color: Colors.red)), onTap: () { Navigator.pop(context); _confirmBlockUser(); }),
           ListTile(leading: const Icon(Icons.flag_outlined, color: Colors.red), title: const Text('Report user', style: TextStyle(color: Colors.red)), onTap: () { Navigator.pop(context); _reportUser(); }),
         ],
       ])));
+  }
+
+  /// Canonical shareable profile URL. Matches the in-app `/users/:userId` route
+  /// (app_router.dart) and the link shape used for promotions. Deep linking is
+  /// deferred for v1.0, so this opens on the web — it does not reopen the app yet.
+  String _profileUrl(UserModel u) => 'https://flyconnect.co/users/${u.uid}';
+
+  /// Share the viewed profile via the native OS share sheet. `_user` holds the
+  /// correct profile for both the own-profile and other-profile cases.
+  Future<void> _shareProfile() async {
+    final u = _user;
+    if (u == null) return;
+    final url = _profileUrl(u);
+    try {
+      await SharePlus.instance.share(
+        ShareParams(text: '${u.name} on FlyConnect\n$url', subject: '${u.name} on FlyConnect'),
+      );
+    } catch (_) {
+      // Fallback if the native share sheet is unavailable (e.g. web/desktop):
+      // copy the link, mirroring the promotions share pattern.
+      if (!mounted) return;
+      await Clipboard.setData(ClipboardData(text: url));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile link copied to clipboard')),
+      );
+    }
+  }
+
+  /// Show a scannable QR code of the profile URL (own-profile only). Rendered on
+  /// a white card so the default black QR modules stay readable on the dark sheet.
+  void _showMyQr() {
+    final u = _user;
+    if (u == null) return;
+    final url = _profileUrl(u);
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(u.name, style: AppTextStyles.h3, textAlign: TextAlign.center),
+            const SizedBox(height: 4),
+            const Text('Scan to view profile', style: AppTextStyles.caption, textAlign: TextAlign.center),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+              child: QrImageView(data: url, version: QrVersions.auto, size: 220, backgroundColor: Colors.white),
+            ),
+            const SizedBox(height: 20),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+              FilledButton.icon(
+                onPressed: () { Navigator.pop(ctx); _shareProfile(); },
+                icon: const Icon(Icons.share, size: 18),
+                label: const Text('Share'),
+              ),
+            ]),
+          ]),
+        ),
+      ),
+    );
   }
 
   /// Block the viewed user. The provider write (PostProvider.blockUser) already

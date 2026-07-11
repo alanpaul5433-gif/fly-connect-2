@@ -106,7 +106,7 @@ FlyConnect is free to use. Business accounts may offer paid promotions (always m
 ---
 
 Questions, feedback, or support?
-→ support@flyconnect.app
+→ support@flyconnect.co
 
 By creating an account you agree to our Terms of Service and Privacy Policy, available at flyconnect.co/terms-of-service/ and flyconnect.co/privacy-policy/.
 ```
@@ -125,8 +125,8 @@ By creating an account you agree to our Terms of Service and Privacy Policy, ava
 
 ## Contact Details for Play Console
 
-- **Website:** `https://flyconnect.app`
-- **Email:** `support@flyconnect.app`
+- **Website:** `https://flyconnect.co`
+- **Email:** `support@flyconnect.co`
 - **Phone:** _(optional — include only if you have a staffed support line)_
 
 ---
@@ -158,7 +158,7 @@ This is our launch release. We're starting with:
 • Digital passport for your travel history
 • SafeCheck for layover safety
 
-Tell us what you'd love to see next → feedback@flyconnect.app
+Tell us what you'd love to see next → feedback@flyconnect.co
 ```
 
 ---

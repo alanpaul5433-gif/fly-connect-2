@@ -128,7 +128,7 @@ For each "Yes" above, the purpose categories declared are:
 ## Section 4: Security practices
 
 - ✅ **Data is encrypted in transit** (HTTPS/TLS)
-- ✅ **Users can request data deletion** (in-app Delete Account + email request to privacy@flyconnect.app)
+- ✅ **Users can request data deletion** (in-app Delete Account + email request to privacy@flyconnect.co)
 - ✅ **Committed to the Play Families Policy** — FlyConnect is targeted at users 16+ only. Signup does not allow age declarations below 16.
 - ✅ **Independent security review** — declare only if you actually pay for a third-party audit; otherwise leave unchecked.
 

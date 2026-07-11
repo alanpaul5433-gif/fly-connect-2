@@ -64,14 +64,14 @@ class _CreatePromotionScreenState extends State<CreatePromotionScreen> {
   Future<void> _post() async {
     if (_titleCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please add a promotion title')));
+        const SnackBar(content: Text('Please add a deal title')));
       return;
     }
     final auth = context.read<AuthProvider>();
     final user = auth.currentUser;
     if (user == null || user.role != 'business') {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Only business accounts can create promotions.'),
+        content: Text('Only business accounts can create deals.'),
         backgroundColor: Colors.red));
       return;
     }
@@ -108,7 +108,7 @@ class _CreatePromotionScreenState extends State<CreatePromotionScreen> {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Promotion submitted! It will be visible to crew after admin approval.'),
+          content: Text('Deal submitted! It will be visible to crew after admin approval.'),
           backgroundColor: Colors.green,
           duration: Duration(seconds: 4),
         ));
@@ -116,7 +116,7 @@ class _CreatePromotionScreenState extends State<CreatePromotionScreen> {
       if (!mounted) return;
       setState(() => _posting = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Failed to create promotion: $e'),
+        content: Text('Failed to create deal: $e'),
         backgroundColor: Colors.red));
     }
   }
@@ -133,7 +133,7 @@ class _CreatePromotionScreenState extends State<CreatePromotionScreen> {
           icon: const Icon(Icons.close, color: AppColors.textPrimary),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Create Promotion', style: AppTextStyles.labelLarge),
+        title: const Text('Create Deal', style: AppTextStyles.labelLarge),
         centerTitle: true,
         actions: [
           Padding(
@@ -171,7 +171,7 @@ class _CreatePromotionScreenState extends State<CreatePromotionScreen> {
                   : const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                       Icon(Icons.camera_alt_outlined, color: Colors.white54, size: 36),
                       SizedBox(height: 10),
-                      Text('Add promotion image', style: TextStyle(color: Colors.white54, fontSize: 13)),
+                      Text('Add deal image', style: TextStyle(color: Colors.white54, fontSize: 13)),
                     ]),
             ),
           ),
@@ -179,7 +179,7 @@ class _CreatePromotionScreenState extends State<CreatePromotionScreen> {
 
           TextField(
             controller: _titleCtrl,
-            decoration: _inputDec('Promotion Title'),
+            decoration: _inputDec('Deal Title'),
           ),
           const SizedBox(height: 14),
 
@@ -230,7 +230,7 @@ class _CreatePromotionScreenState extends State<CreatePromotionScreen> {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Maximum number of times this promotion can be redeemed by users',
+            'Maximum number of times this deal can be redeemed by users',
             style: TextStyle(fontSize: 11, color: Colors.grey),
           ),
           const SizedBox(height: 32),

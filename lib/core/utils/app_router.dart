@@ -50,6 +50,7 @@ import '../../features/admin/admin_dashboard_page.dart';
 import '../../features/admin/admin_users_page.dart';
 import '../../features/admin/admin_content_page.dart';
 import '../../features/admin/admin_safecheck_page.dart';
+import '../../features/admin/admin_nearby_page.dart';
 import '../../features/admin/admin_events_page.dart';
 import '../../features/admin/admin_analytics_page.dart';
 import '../../features/admin/admin_notifications_page.dart';
@@ -95,6 +96,13 @@ final GoRouter appRouter = GoRouter(
         }
 
         if ((loc == '/dashboard' || loc == '/promotions' || loc == '/business-events') &&
+            role != 'business' && role != 'admin') {
+          return AppRoutes.home;
+        }
+
+        // Event/Group creation is business-only (admins allowed for moderation).
+        // Catches deep-links / direct navigation; the UI also hides the buttons.
+        if ((loc == '/create-event' || loc == AppRoutes.createGroup) &&
             role != 'business' && role != 'admin') {
           return AppRoutes.home;
         }
@@ -148,6 +156,7 @@ final GoRouter appRouter = GoRouter(
         GoRoute(path: AppRoutes.adminUsers, builder: (_, __) => const AdminUsersPage()),
         GoRoute(path: AppRoutes.adminContent, builder: (_, __) => const AdminContentPage()),
         GoRoute(path: AppRoutes.adminSafeCheck, builder: (_, __) => const AdminSafeCheckPage()),
+        GoRoute(path: AppRoutes.adminNearby, builder: (_, __) => const AdminNearbyPage()),
         GoRoute(path: AppRoutes.adminEvents, builder: (_, __) => const AdminEventsPage()),
         GoRoute(path: AppRoutes.adminAnalytics, builder: (_, __) => const AdminAnalyticsPage()),
         GoRoute(path: AppRoutes.adminNotifications, builder: (_, __) => const AdminNotificationsPage()),

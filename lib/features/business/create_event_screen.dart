@@ -61,6 +61,12 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         backgroundColor: Colors.red));
       return;
     }
+    if (auth.userRole != 'business' && auth.userRole != 'admin') {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Only business accounts can create events.'),
+        backgroundColor: Colors.red));
+      return;
+    }
     setState(() => _loading = true);
     final req = _requirementsCtrl.text.trim();
     final newEvent = EventModel(

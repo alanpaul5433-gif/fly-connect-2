@@ -6,11 +6,17 @@
     <!-- Push notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
-    <!-- Image picker: camera + gallery -->
+    <!-- Image picking uses the Android Photo Picker (image_picker 0.8.13+), which needs
+         NO storage/media permission, so READ_MEDIA_IMAGES / READ_EXTERNAL_STORAGE are
+         intentionally NOT declared (avoids Google Play's Photo & Video Permissions policy).
+         CAMERA is declared only for optional in-app photo capture (ImageSource.camera). -->
     <uses-permission android:name="android.permission.CAMERA"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32"/>
+
+    <!-- Strip the advertising ID. Firebase Analytics injects com.google.android.gms.permission.AD_ID
+         transitively, but FlyConnect serves no ads and uses Analytics only for app-open/event metrics.
+         Removing it lets us declare "No advertising ID" on Google Play and keeps Data Safety simpler.
+         Analytics still works via the app-instance ID. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove"/>
 
     <!-- Location (SafeCheck, Nearby Users) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>

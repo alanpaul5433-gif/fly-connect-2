@@ -109,7 +109,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         // Developer testing removed for production
         _Section(title: 'Support', children: [
           _Tile(icon: Icons.help_outline, label: 'Help & Support',
-            onTap: () => _showInfoSheet(context, 'Help & Support', 'Contact: support@flyconnect.app')),
+            onTap: () => _showInfoSheet(context, 'Help & Support', 'Contact: support@flyconnect.co')),
           _Tile(icon: Icons.description_outlined, label: 'Terms of Service',
             onTap: () => _openUrl(LegalUrls.termsOfService)),
           _Tile(icon: Icons.privacy_tip_outlined, label: 'Privacy Policy',

@@ -80,7 +80,7 @@ class DashboardScreen extends StatelessWidget {
             childAspectRatio: 1.4,
             children: [
               _StatCard(icon: Icons.people_outline, value: followerCount.toString(), label: 'Followers'),
-              _StatCard(icon: Icons.local_offer_outlined, value: '$activePromoCount', label: 'Active Promotions'),
+              _StatCard(icon: Icons.local_offer_outlined, value: '$activePromoCount', label: 'Active Deals'),
               _StatCard(icon: Icons.event_outlined, value: '$upcomingEventCount', label: 'Upcoming Events'),
               _StatCard(icon: Icons.visibility_outlined, value: '$totalPromoViews', label: 'Promo Views'),
             ],
@@ -93,7 +93,7 @@ class DashboardScreen extends StatelessWidget {
           Row(children: [
             Expanded(child: _QuickAction(
               icon: Icons.local_offer,
-              label: 'Create Promotion',
+              label: 'Create Deal',
               onTap: () => context.push('/promotions/create'),
             )),
             const SizedBox(width: 10),
@@ -223,7 +223,7 @@ class _RecentActivitySection extends StatelessWidget {
           color: Colors.white, borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.grey.shade100)),
         child: const Center(
-          child: Text('No activity yet. Create a promotion or event to get started.',
+          child: Text('No activity yet. Create a deal or event to get started.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey, fontSize: 13)),
         ),

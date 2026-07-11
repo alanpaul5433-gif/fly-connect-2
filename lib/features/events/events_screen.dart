@@ -33,6 +33,9 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
 
   @override
   Widget build(BuildContext context) {
+    // Event/Group creation is restricted to business (and admin) accounts.
+    final role = context.watch<AuthProvider>().userRole;
+    final canCreate = role == 'business' || role == 'admin';
     return Scaffold(
       backgroundColor: AppColors.background,
       drawer: const AppDrawer(),
@@ -40,9 +43,10 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
         showMenuIcon: true,
         showBack: Navigator.canPop(context),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add, color: AppColors.textPrimary),
-            onPressed: () => context.push('/create-event')),
+          if (canCreate)
+            IconButton(
+              icon: const Icon(Icons.add, color: AppColors.textPrimary),
+              onPressed: () => context.push('/create-event')),
           const TopBarActions(),
         ],
       ),
@@ -110,8 +114,9 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
                 const SizedBox(height: 20),
               ],
 
-              // Create group CTA
-              Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
+              // Create group CTA — business/admin only
+              if (canCreate)
+                Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -143,8 +148,8 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
                   title: 'No events yet',
                   subtitle:
                       'Check back soon, or start one yourself for your crew.',
-                  actionLabel: 'Create Event',
-                  onAction: () => context.push('/create-event'),
+                  actionLabel: canCreate ? 'Create Event' : null,
+                  onAction: canCreate ? () => context.push('/create-event') : null,
                 )
               else
                 ListView.builder(

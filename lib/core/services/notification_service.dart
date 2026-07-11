@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, debugPrint, defaultTargetPlatform, TargetPlatform;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -52,8 +53,14 @@ class NotificationService {
     // Persist token whenever auth state changes (catches logout/login) and on rotation.
     _authSub = FirebaseAuth.instance.authStateChanges().listen((user) async {
       if (user == null) return;
-      final token = await messaging.getToken();
-      if (token != null) await _saveToken(user.uid, token);
+      try {
+        final token = await _resolveFcmToken(messaging);
+        if (token != null) await _saveToken(user.uid, token);
+      } catch (e) {
+        // Never let a token hiccup escape into the zone (Crashlytics/debugger).
+        // onTokenRefresh persists the token once FCM actually has it.
+        debugPrint('[FCM] token fetch deferred: $e');
+      }
     });
 
     _tokenSub = messaging.onTokenRefresh.listen((token) async {
@@ -83,6 +90,29 @@ class NotificationService {
       Future<void>.delayed(const Duration(milliseconds: 300))
           .then((_) => _handleTap(initial));
     }
+  }
+
+  /// Fetches the FCM token, ensuring the APNS token exists first on Apple
+  /// platforms.
+  ///
+  /// iOS/macOS deliver the APNS token asynchronously a beat *after* the
+  /// permission grant, and [FirebaseMessaging.getToken] throws
+  /// `apns-token-not-set` if called before then. We poll [getAPNSToken]
+  /// briefly; if it never arrives we return null instead of throwing, and
+  /// [FirebaseMessaging.onTokenRefresh] persists the token once it lands.
+  Future<String?> _resolveFcmToken(FirebaseMessaging messaging) async {
+    final isApple = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS);
+    if (isApple) {
+      var apns = await messaging.getAPNSToken();
+      for (var attempt = 0; apns == null && attempt < 5; attempt++) {
+        await Future<void>.delayed(const Duration(seconds: 1));
+        apns = await messaging.getAPNSToken();
+      }
+      if (apns == null) return null; // not ready — let onTokenRefresh retry
+    }
+    return messaging.getToken();
   }
 
   /// Resolves the FCM data payload into an in-app deep link and navigates.

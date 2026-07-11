@@ -20,7 +20,7 @@ class BusinessShell extends StatelessWidget {
         const SizedBox(height: 16),
         ListTile(
           leading: const Icon(Icons.local_offer, color: AppColors.dark),
-          title: const Text('Create Promotion', style: TextStyle(fontWeight: FontWeight.w600)),
+          title: const Text('Create Deal', style: TextStyle(fontWeight: FontWeight.w600)),
           onTap: () { Navigator.pop(context); context.push('/promotions/create'); },
         ),
         ListTile(
@@ -91,7 +91,7 @@ class BusinessShell extends StatelessWidget {
             child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
               _BizNavItem(icon: Icons.grid_view_rounded, label: 'Dashboard', active: current == 0,
                 onTap: () => GoRouter.of(context).go('/dashboard')),
-              _BizNavItem(icon: Icons.local_offer_outlined, label: 'Promotions', active: current == 1,
+              _BizNavItem(icon: Icons.local_offer_outlined, label: 'Crew Deals', active: current == 1,
                 onTap: () => GoRouter.of(context).go('/promotions')),
               GestureDetector(
                 onTap: () => _showQuickActions(context),
@@ -164,7 +164,7 @@ class _BusinessDrawer extends StatelessWidget {
           // Menu items
           _DrawerItem(icon: Icons.grid_view_rounded, label: 'Dashboard',
             onTap: () { Navigator.pop(context); GoRouter.of(context).go('/dashboard'); }),
-          _DrawerItem(icon: Icons.local_offer_outlined, label: 'Promotions',
+          _DrawerItem(icon: Icons.local_offer_outlined, label: 'Crew Deals',
             onTap: () { Navigator.pop(context); GoRouter.of(context).go('/promotions'); }),
           _DrawerItem(icon: Icons.event_outlined, label: 'Events',
             onTap: () { Navigator.pop(context); GoRouter.of(context).go('/business-events'); }),

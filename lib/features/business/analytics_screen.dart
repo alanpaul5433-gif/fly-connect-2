@@ -179,7 +179,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
           const SizedBox(height: 24),
 
-          const Text('Promotion Performance', style: AppTextStyles.labelLarge),
+          const Text('Crew Deal Performance', style: AppTextStyles.labelLarge),
           const SizedBox(height: 12),
 
           ListView.separated(

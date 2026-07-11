@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -412,8 +413,17 @@ class AuthProvider extends ChangeNotifier {
   }
 
   // ── Apple Sign-In ──────────────────────────────────────────
-  // iOS native: requires "Sign in with Apple" capability in Xcode.
-  // Web/Android: requires Apple Service ID + Firebase provider config.
+  // iOS native: uses the bundle id as the client (no Services ID needed).
+  // Web/Android: use Apple's web OAuth flow via the Services ID below.
+  //
+  // NOTE: this Services ID must exist in the Apple Developer portal
+  // (Identifiers → Services IDs) with "Sign in with Apple" configured for
+  // primary App ID com.urbansyncinnovations.flyconnect and the redirect URL
+  // below registered as a Return URL. It is NOT the bundle id.
+  static const _appleServicesId = 'com.urbansyncinnovations.flyconnect.signin';
+  static const _appleRedirectUri =
+      'https://flyconnect-ab4f2.firebaseapp.com/__/auth/handler';
+
   Future<bool> signInWithApple({String role = 'user'}) async {
     _loading = true; _error = null; notifyListeners();
     try {
@@ -434,7 +444,41 @@ class AuthProvider extends ChangeNotifier {
             AppleIDAuthorizationScopes.fullName,
           ],
           nonce: nonce,
+          // Android has no native Apple SDK — it must use Apple's web OAuth
+          // flow, which needs the Services ID as the client + the Firebase
+          // callback as the return URL. iOS uses the native sheet and ignores
+          // this, so only pass it on Android.
+          webAuthenticationOptions:
+              defaultTargetPlatform == TargetPlatform.android
+                  ? WebAuthenticationOptions(
+                      clientId: _appleServicesId,
+                      redirectUri: Uri.parse(_appleRedirectUri),
+                    )
+                  : null,
         );
+
+        // ── Diagnostic (Phase 1 evidence) ──────────────────────────
+        // Decode the Apple idToken to see the exact claims Firebase validates:
+        //   aud  must == our bundle id (com.urbansyncinnovations.flyconnect)
+        //   iss  must == https://appleid.apple.com
+        //   nonce claim must == sha256(rawNonce)
+        //   exp  must be in the future
+        // Whichever is wrong is why Firebase returns invalid-credential.
+        assert(() {
+          final tok = appleCredential.identityToken;
+          debugPrint('[AppleSignIn] identityToken present: ${tok != null} '
+              '(len=${tok?.length ?? 0}); '
+              'authCode present: ${appleCredential.authorizationCode.isNotEmpty}; '
+              'rawNonce len: ${rawNonce.length}');
+          if (tok != null) {
+            final c = _decodeJwtPayload(tok);
+            debugPrint('[AppleSignIn] claims: aud=${c['aud']} iss=${c['iss']} '
+                'sub=${c['sub']} exp=${c['exp']} '
+                'nonceClaim=${c['nonce']} '
+                'nonce==sha256(raw)? ${c['nonce'] == _sha256(rawNonce)}');
+          }
+          return true;
+        }());
 
         final oauthCredential = OAuthProvider('apple.com').credential(
           idToken: appleCredential.identityToken,
@@ -464,7 +508,13 @@ class AuthProvider extends ChangeNotifier {
       _loading = false; notifyListeners();
       return false;
     } on FirebaseAuthException catch (e) {
-      _error = e.message ?? 'Apple sign-in failed';
+      // The CODE is the diagnostic field; the message is generic.
+      assert(() {
+        debugPrint('[AppleSignIn] FirebaseAuthException '
+            'code=${e.code} message=${e.message}');
+        return true;
+      }());
+      _error = _describeAppleAuthError(e.code) ?? e.message ?? 'Apple sign-in failed';
       _loading = false; notifyListeners();
       return false;
     } catch (e) {
@@ -514,6 +564,34 @@ class AuthProvider extends ChangeNotifier {
   String _sha256(String input) {
     final bytes = utf8.encode(input);
     return sha256.convert(bytes).toString();
+  }
+
+  // Decode a JWT payload (base64url) — diagnostics only, no verification.
+  Map<String, dynamic> _decodeJwtPayload(String jwt) {
+    final parts = jwt.split('.');
+    if (parts.length != 3) return const {};
+    var p = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+    p = p.padRight(p.length + ((4 - p.length % 4) % 4), '=');
+    try {
+      return json.decode(utf8.decode(base64.decode(p))) as Map<String, dynamic>;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  // ── Map a FirebaseAuthException.code to an actionable Apple message ──
+  // TODO(you): translate the raw code into guidance. This is a real UX /
+  // diagnostics decision — what does the END USER see vs. what helps YOU
+  // debug? Codes worth handling:
+  //   • 'operation-not-allowed' → Apple provider is OFF in Firebase Console
+  //   • 'invalid-credential'    → nonce / token mismatch or expired token
+  //   • 'internal-error'        → Apple Developer App ID "Sign In with Apple"
+  //                               capability / grouping (carries the
+  //                               "Invalid OAuth response from apple.com" text)
+  // Return a string to override the generic message, or null to fall back.
+  String? _describeAppleAuthError(String code) {
+    // TODO: implement the mapping (5-10 lines).
+    return null;
   }
 }
 
@@ -901,10 +979,45 @@ class PostProvider extends ChangeNotifier {
     }
   }
 
+  // Upload a post video (+ optional poster) to Firebase Storage and return the
+  // download URLs. Mirrors [uploadPostImage] (bytes in → putData → URL out) but
+  // skips image compression (that codec is image-only) and tags the correct
+  // video content-type. The composer reads bytes and generates the poster, so
+  // this stays free of dart:io / plugin imports and is safe for the web build.
+  // Path: user_uploads/{uid}/posts/{timestamp}.{mp4|mov} (+ _thumb.jpg)
+  Future<Map<String, String>?> uploadPostVideo({
+    required Uint8List videoBytes,
+    required String ext, // 'mp4' | 'mov'
+    Uint8List? thumbnailBytes,
+  }) async {
+    if (isMock) return null;
+    if (_uid == null) return null;
+    try {
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final contentType = ext == 'mov' ? 'video/quicktime' : 'video/mp4';
+      final vref = FirebaseStorage.instance.ref('user_uploads/$_uid/posts/$ts.$ext');
+      await vref.putData(videoBytes, SettableMetadata(contentType: contentType));
+      final videoUrl = await vref.getDownloadURL();
+
+      String? thumbnailUrl;
+      if (thumbnailBytes != null) {
+        final tref = FirebaseStorage.instance.ref('user_uploads/$_uid/posts/${ts}_thumb.jpg');
+        await tref.putData(thumbnailBytes, SettableMetadata(contentType: 'image/jpeg'));
+        thumbnailUrl = await tref.getDownloadURL();
+      }
+      return {'videoUrl': videoUrl, if (thumbnailUrl != null) 'thumbnailUrl': thumbnailUrl};
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> createPost({
     required String caption,
     List<String> mediaUrls = const [],
     String mediaType = 'text',
+    String? thumbnailUrl,
+    double? aspectRatio,
+    int? durationMs,
     String? location,
     String? groupId,
     String audience = 'Everyone',  // Everyone | Connections | Only me
@@ -916,6 +1029,7 @@ class PostProvider extends ChangeNotifier {
         authorId: user?.uid ?? 'user_001', authorName: user?.name ?? 'Alex Johnson',
         authorPhotoUrl: user?.photoUrl,
         caption: caption, mediaUrls: mediaUrls, mediaType: mediaType,
+        thumbnailUrl: thumbnailUrl, aspectRatio: aspectRatio, durationMs: durationMs,
         location: location, likeCount: 0, commentCount: 0, createdAt: DateTime.now());
       _feed.insert(0, post);
       notifyListeners(); return;
@@ -926,6 +1040,7 @@ class PostProvider extends ChangeNotifier {
     final post = PostModel(
       id: ref.id, authorId: _uid!, authorName: user.displayName ?? 'User',
       caption: caption, mediaUrls: mediaUrls, mediaType: mediaType,
+      thumbnailUrl: thumbnailUrl, aspectRatio: aspectRatio, durationMs: durationMs,
       location: location, groupId: groupId, createdAt: DateTime.now(),
     );
     final data = post.toFirestore();

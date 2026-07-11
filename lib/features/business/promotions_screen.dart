@@ -23,7 +23,7 @@ class PromotionsScreen extends StatelessWidget {
           backgroundColor: Colors.white,
           elevation: 0,
           automaticallyImplyLeading: false,
-          title: const Text('Promotions', style: AppTextStyles.labelLarge),
+          title: const Text('Crew Deals', style: AppTextStyles.labelLarge),
           centerTitle: true,
           actions: [
             IconButton(
@@ -61,8 +61,8 @@ class _PromotionList extends StatelessWidget {
     if (promotions.isEmpty) {
       return const EmptyState(
         icon: Icons.local_offer_outlined,
-        title: 'No promotions yet',
-        subtitle: 'Create your first promotion to reach more customers.',
+        title: 'No deals yet',
+        subtitle: 'Create your first deal to reach more customers.',
       );
     }
     return ListView.builder(
@@ -156,7 +156,7 @@ class _PromotionCard extends StatelessWidget {
                 final link = 'https://flyconnect.co/promotions/${promo.id}';
                 Clipboard.setData(ClipboardData(text: link));
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Promotion link copied to clipboard'),
+                  content: Text('Deal link copied to clipboard'),
                   duration: Duration(seconds: 2)));
               },
               style: ElevatedButton.styleFrom(

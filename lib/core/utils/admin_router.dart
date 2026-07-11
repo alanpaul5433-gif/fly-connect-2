@@ -12,6 +12,7 @@ import '../../features/admin/admin_dashboard_page.dart';
 import '../../features/admin/admin_users_page.dart';
 import '../../features/admin/admin_content_page.dart';
 import '../../features/admin/admin_safecheck_page.dart';
+import '../../features/admin/admin_nearby_page.dart';
 import '../../features/admin/admin_events_page.dart';
 import '../../features/admin/admin_analytics_page.dart';
 import '../../features/admin/admin_notifications_page.dart';
@@ -77,6 +78,10 @@ final GoRouter adminRouter = GoRouter(
         GoRoute(
           path: AppRoutes.adminSafeCheck,
           builder: (_, __) => const AdminSafeCheckPage(),
+        ),
+        GoRoute(
+          path: AppRoutes.adminNearby,
+          builder: (_, __) => const AdminNearbyPage(),
         ),
         GoRoute(
           path: AppRoutes.adminEvents,

@@ -50,7 +50,7 @@ class MainShell extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-              _NavItem(icon: Icons.grid_view_rounded, index: 0, current: currentIndex, onTap: (i) => _onTap(context, i, 'user')),
+              _NavItem(assetPath: 'assets/images/nav_home.png', tintAsset: true, index: 0, current: currentIndex, onTap: (i) => _onTap(context, i, 'user')),
               _NavItem(icon: Icons.event_outlined, index: 1, current: currentIndex, onTap: (i) => _onTap(context, i, 'user')),
               GestureDetector(
                 onTap: () => context.push(AppRoutes.createPost),
@@ -60,7 +60,7 @@ class MainShell extends StatelessWidget {
                   child: const Icon(Icons.add_rounded, color: AppColors.dark, size: 28),
                 ),
               ),
-              _NavItem(icon: Icons.favorite_outline_rounded, index: 2, current: currentIndex, onTap: (i) => _onTap(context, i, 'user')),
+              _NavItem(assetPath: 'assets/images/nav_match.png', index: 2, current: currentIndex, onTap: (i) => _onTap(context, i, 'user')),
               _NavItem(icon: Icons.person_outline_rounded, index: 4, current: currentIndex, onTap: (i) => _onTap(context, i, 'user')),
             ]),
           ),
@@ -152,7 +152,7 @@ class AppDrawer extends StatelessWidget {
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.email_outlined),
                             title: const Text('Email Support'),
-                            subtitle: const Text('support@flyconnect.app'),
+                            subtitle: const Text('support@flyconnect.co'),
                             onTap: () => Navigator.pop(context),
                           ),
                           ListTile(
@@ -166,7 +166,7 @@ class AppDrawer extends StatelessWidget {
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.article_outlined),
                             title: const Text('FAQ & Guides'),
-                            subtitle: const Text('flyconnect.app/help'),
+                            subtitle: const Text('flyconnect.co/help'),
                             onTap: () => Navigator.pop(context),
                           ),
                         ]),
@@ -204,15 +204,22 @@ class AppDrawer extends StatelessWidget {
 }
 
 class _NavItem extends StatelessWidget {
-  final IconData icon;
+  final IconData? icon;
+  final String? assetPath;
+  // When true, a monochrome [assetPath] is recolored to match the active/inactive
+  // state (like a Material glyph). When false, the asset keeps its own colors and
+  // active/inactive is conveyed via opacity.
+  final bool tintAsset;
   final int index;
   final int current;
   final ValueChanged<int> onTap;
-  const _NavItem({required this.icon, required this.index, required this.current, required this.onTap});
+  const _NavItem({this.icon, this.assetPath, this.tintAsset = false, required this.index, required this.current, required this.onTap})
+      : assert(icon != null || assetPath != null, 'Provide either an icon or an assetPath');
 
   @override
   Widget build(BuildContext context) {
     final active = index == current;
+    final stateColor = active ? AppColors.primary : AppColors.dark.withValues(alpha: 0.4);
     return GestureDetector(
       onTap: () => onTap(index),
       child: AnimatedContainer(
@@ -222,8 +229,22 @@ class _NavItem extends StatelessWidget {
           color: active ? AppColors.primary.withValues(alpha: 0.15) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Icon(icon, color: active ? AppColors.primary : AppColors.dark.withValues(alpha: 0.4), size: 24),
+        child: _buildChild(active, stateColor),
       ),
+    );
+  }
+
+  Widget _buildChild(bool active, Color stateColor) {
+    if (assetPath == null) {
+      return Icon(icon, color: stateColor, size: 24);
+    }
+    if (tintAsset) {
+      return Image.asset(assetPath!, width: 24, height: 24, fit: BoxFit.contain,
+          color: stateColor, colorBlendMode: BlendMode.srcIn);
+    }
+    return Opacity(
+      opacity: active ? 1.0 : 0.4,
+      child: Image.asset(assetPath!, width: 24, height: 24, fit: BoxFit.contain),
     );
   }
 }

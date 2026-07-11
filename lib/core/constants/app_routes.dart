@@ -34,6 +34,7 @@ class AppRoutes {
   static const adminUsers         = '/admin/users';
   static const adminContent       = '/admin/content';
   static const adminSafeCheck     = '/admin/safecheck';
+  static const adminNearby        = '/admin/nearby';
   static const adminEvents        = '/admin/events';
   static const adminAnalytics     = '/admin/analytics';
   static const adminNotifications = '/admin/notifications';

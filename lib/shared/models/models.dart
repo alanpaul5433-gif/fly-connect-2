@@ -110,6 +110,9 @@ class PostModel {
   final String? authorPhotoUrl;
   final List<String> mediaUrls;
   final String mediaType;
+  final String? thumbnailUrl; // poster frame for video posts
+  final double? aspectRatio;  // width/height of the video, for layout
+  final int? durationMs;      // video length in milliseconds
   final String caption;
   final String? location;
   final int likeCount;
@@ -122,6 +125,7 @@ class PostModel {
   const PostModel({
     required this.id, required this.authorId, required this.authorName,
     this.authorPhotoUrl, this.mediaUrls = const [], this.mediaType = 'text',
+    this.thumbnailUrl, this.aspectRatio, this.durationMs,
     this.caption = '', this.location, this.likeCount = 0,
     this.commentCount = 0, this.isReported = false, this.reportCount = 0,
     this.groupId, required this.createdAt,
@@ -137,6 +141,9 @@ class PostModel {
       authorPhotoUrl: d['authorPhotoUrl'],
       mediaUrls: List<String>.from(d['mediaUrls'] ?? []),
       mediaType: d['mediaType'] ?? 'text',
+      thumbnailUrl: d['thumbnailUrl'],
+      aspectRatio: (d['aspectRatio'] as num?)?.toDouble(),
+      durationMs: (d['durationMs'] as num?)?.toInt(),
       caption: d['caption'] ?? '',
       location: d['location'],
       likeCount: d['likeCount'] ?? 0,
@@ -150,7 +157,9 @@ class PostModel {
 
   Map<String, dynamic> toFirestore() => {
     'authorId': authorId, 'authorName': authorName, 'authorPhotoUrl': authorPhotoUrl,
-    'mediaUrls': mediaUrls, 'mediaType': mediaType, 'caption': caption,
+    'mediaUrls': mediaUrls, 'mediaType': mediaType,
+    'thumbnailUrl': thumbnailUrl, 'aspectRatio': aspectRatio, 'durationMs': durationMs,
+    'caption': caption,
     'location': location, 'likeCount': likeCount, 'commentCount': commentCount,
     'isReported': isReported, 'reportCount': reportCount, 'groupId': groupId,
     'createdAt': createdAt,

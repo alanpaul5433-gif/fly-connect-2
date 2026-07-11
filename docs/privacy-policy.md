@@ -79,8 +79,8 @@ You have the right to:
 - **Delete your account** — via Settings → Delete Account (permanent, see Section 4)
 - **Opt out of push notifications** — via Settings → Notifications
 - **Revoke location permission** — via your device settings
-- **Request a copy of your data** — email privacy@flyconnect.app
-- **Object to or restrict processing** — email privacy@flyconnect.app
+- **Request a copy of your data** — email privacy@flyconnect.co
+- **Object to or restrict processing** — email privacy@flyconnect.co
 
 Residents of the European Economic Area (EEA), United Kingdom, and Switzerland have additional rights under the GDPR. California residents have additional rights under the CCPA.
 
@@ -88,7 +88,7 @@ Residents of the European Economic Area (EEA), United Kingdom, and Switzerland h
 
 ## 6. Children's Privacy
 
-FlyConnect is not intended for users under 16 years of age. We do not knowingly collect personal information from children under 16. If we become aware that a child under 16 has provided us with personal information, we will delete it immediately. Contact privacy@flyconnect.app if you believe we have collected information from a child under 16.
+FlyConnect is not intended for users under 16 years of age. We do not knowingly collect personal information from children under 16. If we become aware that a child under 16 has provided us with personal information, we will delete it immediately. Contact privacy@flyconnect.co if you believe we have collected information from a child under 16.
 
 ---
 
@@ -122,9 +122,9 @@ We may update this Privacy Policy from time to time. We will notify you of mater
 
 If you have any questions, concerns, or requests regarding this Privacy Policy or your personal information:
 
-- **Email:** privacy@flyconnect.app
+- **Email:** privacy@flyconnect.co
 - **Postal:** Urban Sync Innovations, _[INSERT REGISTERED BUSINESS ADDRESS]_
-- **Data Protection Officer:** dpo@flyconnect.app _(if applicable under GDPR)_
+- **Data Protection Officer:** dpo@flyconnect.co _(if applicable under GDPR)_
 
 ---
 

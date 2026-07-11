@@ -134,7 +134,7 @@ If you provide feedback, suggestions, or ideas about the Service, you grant us a
 
 ### 7.3 DMCA notices
 
-If you believe content on the Service infringes your copyright, send a DMCA notice to **dmca@flyconnect.app** with:
+If you believe content on the Service infringes your copyright, send a DMCA notice to **dmca@flyconnect.co** with:
 
 - Your contact information
 - Description of the copyrighted work
@@ -220,9 +220,9 @@ _(Arbitration clause is optional and depends on jurisdiction — remove if not a
 
 ## 16. Contact
 
-- **General inquiries:** support@flyconnect.app
-- **Legal notices:** legal@flyconnect.app
-- **DMCA:** dmca@flyconnect.app
+- **General inquiries:** support@flyconnect.co
+- **Legal notices:** legal@flyconnect.co
+- **DMCA:** dmca@flyconnect.co
 - **Postal:** Urban Sync Innovations, _[INSERT REGISTERED BUSINESS ADDRESS]_
 
 ---

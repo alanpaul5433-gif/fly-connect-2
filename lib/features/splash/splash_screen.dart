@@ -76,16 +76,15 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
             child: ScaleTransition(
               scale: _scaleAnim,
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Container(width: 100, height: 100,
-                  decoration: BoxDecoration(color: AppColors.dark, borderRadius: BorderRadius.circular(24)),
-                  child: const Center(child: Text('✈️', style: TextStyle(fontSize: 48)))),
-                const SizedBox(height: 20),
-                const Text('FlyConnect', style: TextStyle(color: Colors.white,
-                  fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                const SizedBox(height: 8),
-                if (kDebugMode)
-                  Text('DEBUG MODE', style: TextStyle(color: Colors.white.withValues(alpha: 0.5),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: Image.asset('assets/images/app_icon.png', width: 140, height: 140),
+                ),
+                if (kDebugMode) ...[
+                  const SizedBox(height: 16),
+                  Text('DEBUG MODE', style: TextStyle(color: AppColors.dark.withValues(alpha: 0.6),
                     fontSize: 11, letterSpacing: 2)),
+                ],
               ]),
             ),
           ),
