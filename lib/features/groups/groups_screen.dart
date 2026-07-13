@@ -130,9 +130,14 @@ class GroupsScreen extends StatelessWidget {
                     minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                   child: const Text('Join', style: TextStyle(fontSize: 12))),
             onTap: () {
-              final isBusiness = context.read<AuthProvider>().userRole == 'business';
-              if (isBusiness) {
-                context.push('/business-group-management');
+              final uid = context.read<AuthProvider>().currentUser?.uid;
+              // Only route to the management screen for a group this
+              // business actually owns/admins — otherwise even a business
+              // account just views details like any other member, since
+              // management actions (delete, broadcast) are real now.
+              final canManage = uid != null && (g.createdBy == uid || g.admins.contains(uid));
+              if (canManage) {
+                context.push('/business-group-management', extra: g);
               } else {
                 context.push('${AppRoutes.groupDetails}/${g.id}');
               }

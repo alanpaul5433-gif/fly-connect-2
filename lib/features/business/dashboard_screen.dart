@@ -100,7 +100,7 @@ class DashboardScreen extends StatelessWidget {
             Expanded(child: _QuickAction(
               icon: Icons.event,
               label: 'Create Event',
-              onTap: () => context.push('/business-event-management'),
+              onTap: () => context.push('/create-event'),
             )),
             const SizedBox(width: 10),
             Expanded(child: _QuickAction(

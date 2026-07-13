@@ -1,10 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/models/models.dart';
+import '../../shared/providers/event_provider.dart';
 
 // ignore_for_file: use_build_context_synchronously
 
@@ -128,15 +131,24 @@ class _EventManagementScreenState extends State<EventManagementScreen>
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    _editTitle = titleCtrl.text.trim().isEmpty ? _editTitle : titleCtrl.text.trim();
-                    _editDesc = descCtrl.text.trim().isEmpty ? _editDesc : descCtrl.text.trim();
-                    _editLocation = locCtrl.text.trim().isEmpty ? _editLocation : locCtrl.text.trim();
-                  });
+                onPressed: () async {
+                  final newTitle = titleCtrl.text.trim().isEmpty ? _editTitle : titleCtrl.text.trim();
+                  final newDesc = descCtrl.text.trim().isEmpty ? _editDesc : descCtrl.text.trim();
+                  final newLocation = locCtrl.text.trim().isEmpty ? _editLocation : locCtrl.text.trim();
+                  final messenger = ScaffoldMessenger.of(context);
                   Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Event updated successfully'), duration: Duration(seconds: 2)));
+                  try {
+                    await context.read<EventProvider>().updateEvent(widget.event.id,
+                      title: newTitle, description: newDesc, location: newLocation);
+                    if (mounted) {
+                      setState(() { _editTitle = newTitle; _editDesc = newDesc; _editLocation = newLocation; });
+                    }
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('Event updated successfully'), duration: Duration(seconds: 2)));
+                  } catch (_) {
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('Could not update event. Try again.')));
+                  }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.dark, foregroundColor: AppColors.primary,
@@ -166,16 +178,31 @@ class _EventManagementScreenState extends State<EventManagementScreen>
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
+              Navigator.pop(context);
               setState(() {
                 if (status == 'approved') {
                   _approved.remove(u);
                 } else if (status == 'pending') _pending.remove(u);
                 else _declined.remove(u);
               });
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('${u.name} removed'), duration: const Duration(seconds: 2)));
+              try {
+                await context.read<EventProvider>().removeAttendee(widget.event.id, u.uid);
+                messenger.showSnackBar(
+                  SnackBar(content: Text('${u.name} removed'), duration: const Duration(seconds: 2)));
+              } catch (_) {
+                if (mounted) {
+                  setState(() {
+                    if (status == 'approved') {
+                      _approved.add(u);
+                    } else if (status == 'pending') _pending.add(u);
+                    else _declined.add(u);
+                  });
+                }
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Could not remove attendee. Try again.')));
+              }
             },
             child: const Text('Remove', style: TextStyle(color: Colors.red)),
           ),
@@ -251,8 +278,11 @@ class _EventManagementScreenState extends State<EventManagementScreen>
           ),
           IconButton(
             icon: const Icon(Icons.share_outlined, color: Colors.black),
-            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Link copied!'))),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: 'https://flyconnect.co/events/${e.id}'));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Link copied!')));
+            },
           ),
         ],
       ),

@@ -35,7 +35,13 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     try {
       final auth = context.read<AuthProvider>();
       if (auth.isLoggedIn) {
-        // Already authenticated — route to correct shell based on role
+        // Already authenticated — wait for the role fetch to actually finish
+        // before deciding, so a slow Firestore read can't leave us reading
+        // the 'user' default and stranding a business/admin account in the
+        // wrong shell. Bounded so an offline/unreachable Firestore can't
+        // hang splash forever.
+        await auth.authReady.timeout(const Duration(seconds: 3), onTimeout: () {});
+        if (!mounted) return;
         final role = auth.userRole;
         if (!mounted) return;
         switch (role) {

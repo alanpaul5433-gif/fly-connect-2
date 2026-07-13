@@ -132,7 +132,11 @@ service cloud.firestore {
 
       match /rsvps/{userId} {
         allow read: if isAuth();
-        allow write: if isOwner(userId);
+        // The attendee manages their own RSVP; the event's creator (or an
+        // admin) may also write any attendee's doc — needed for the
+        // approve/decline/remove-attendee flow in event management.
+        allow write: if isOwner(userId) || isAdmin()
+          || isOwner(get(/databases/$(database)/documents/events/$(eventId)).data.createdBy);
       }
     }
 
@@ -148,6 +152,16 @@ service cloud.firestore {
         || (isAuth() && request.auth.uid in resource.data.admins)
         || (isAuth() && changedOnly(['members','memberCount']));
       allow delete: if isOwner(resource.data.createdBy) || isAdmin();
+
+      // Broadcast messages sent by a group admin. Persisted as a durable
+      // record (not yet fanned out as per-member notifications/push).
+      match /broadcasts/{broadcastId} {
+        allow read: if isAuth() && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.members;
+        allow create: if isAuth()
+          && (isAdmin() || request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.admins)
+          && request.resource.data.senderId == request.auth.uid;
+        allow update, delete: if isAdmin();
+      }
     }
 
     // ── Matches ────────────────────────────────────────────

@@ -99,6 +99,13 @@ class AuthProvider extends ChangeNotifier {
 
   StreamSubscription<User?>? _authSub;
 
+  // Completes once the first authStateChanges event has been fully handled
+  // (including the Firestore role fetch for a logged-in user). SplashScreen
+  // awaits this before reading userRole so it doesn't route on the 'user'
+  // default while _fetchUser is still in flight.
+  final Completer<void> _authReadyCompleter = Completer<void>();
+  Future<void> get authReady => _authReadyCompleter.future;
+
   AuthProvider({this.isMock = false}) {
     if (!isMock) {
       _authSub = _auth.authStateChanges().listen((user) async {
@@ -107,8 +114,11 @@ class AuthProvider extends ChangeNotifier {
         } else {
           _currentUser = null;
         }
+        if (!_authReadyCompleter.isCompleted) _authReadyCompleter.complete();
         notifyListeners();
       });
+    } else {
+      _authReadyCompleter.complete();
     }
   }
 
@@ -1289,6 +1299,28 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> updateEvent(String eventId, {String? title, String? description, String? location}) async {
+    if (isMock) { notifyListeners(); return; }
+    final updates = <String, dynamic>{};
+    if (title != null) updates['title'] = title;
+    if (description != null) updates['description'] = description;
+    if (location != null) updates['location'] = location;
+    if (updates.isEmpty) return;
+    await _db.collection('events').doc(eventId).update(updates);
+  }
+
+  /// Removes an attendee entirely: deletes their rsvp subdoc and reverses
+  /// their contribution to rsvpList/rsvpCount on the parent event.
+  Future<void> removeAttendee(String eventId, String uid) async {
+    if (isMock) { notifyListeners(); return; }
+    await _db.collection('events').doc(eventId).collection('rsvps').doc(uid).delete();
+    await _db.collection('events').doc(eventId).update({
+      'rsvpList': FieldValue.arrayRemove([uid]),
+      'rsvpCount': FieldValue.increment(-1),
+    });
+    _rsvpd.remove(eventId);
+  }
+
   @override
   void dispose() { _eventsSub?.cancel(); super.dispose(); }
 }
@@ -1361,6 +1393,65 @@ class GroupProvider extends ChangeNotifier {
     _db.collection('groups').doc().set(group.toFirestore());
     if (group.id.isNotEmpty) _joined.add(group.id);
     notifyListeners();
+  }
+
+  Future<void> deleteGroup(String groupId) async {
+    if (isMock) { _groups.removeWhere((g) => g.id == groupId); notifyListeners(); return; }
+    await _db.collection('groups').doc(groupId).delete();
+  }
+
+  /// Resolves member uids to profiles, capped to avoid unbounded reads on
+  /// large groups (some groups here run 1000+ members). Chunked into
+  /// Firestore's 30-id `whereIn` limit.
+  static const int memberFetchCap = 60;
+
+  Future<List<UserModel>> fetchMembers(List<String> memberUids) async {
+    if (isMock) return const [];
+    final capped = memberUids.take(memberFetchCap).toList();
+    final results = <UserModel>[];
+    for (var i = 0; i < capped.length; i += 30) {
+      final chunk = capped.sublist(i, i + 30 > capped.length ? capped.length : i + 30);
+      if (chunk.isEmpty) continue;
+      final snap = await _db.collection('users')
+          .where(FieldPath.documentId, whereIn: chunk).get();
+      results.addAll(snap.docs.map((d) => UserModel.fromFirestore(d)));
+    }
+    return results;
+  }
+
+  Future<void> removeMember(String groupId, String uid) async {
+    if (isMock) { notifyListeners(); return; }
+    await _db.collection('groups').doc(groupId).update({
+      'members': FieldValue.arrayRemove([uid]),
+      'admins': FieldValue.arrayRemove([uid]),
+      'memberCount': FieldValue.increment(-1),
+    });
+  }
+
+  Future<void> makeAdmin(String groupId, String uid) async {
+    if (isMock) { notifyListeners(); return; }
+    await _db.collection('groups').doc(groupId).update({
+      'admins': FieldValue.arrayUnion([uid]),
+    });
+  }
+
+  Future<void> setChatEnabled(String groupId, bool enabled) async {
+    if (isMock) { notifyListeners(); return; }
+    await _db.collection('groups').doc(groupId).update({'chatEnabled': enabled});
+  }
+
+  /// Persists a broadcast as a durable, auditable record. Does not yet fan
+  /// out as per-member push/notifications — see firestore.rules for the
+  /// admin-gated write rule backing this subcollection.
+  Future<void> sendBroadcast(String groupId, String text) async {
+    if (isMock) return;
+    final uid = _uid;
+    if (uid == null) return;
+    await _db.collection('groups').doc(groupId).collection('broadcasts').add({
+      'senderId': uid,
+      'text': text,
+      'sentAt': FieldValue.serverTimestamp(),
+    });
   }
 
   @override

@@ -371,6 +371,7 @@ class GroupModel {
   final String? location;
   final bool isPinned;
   final String? chatId;
+  final bool chatEnabled;
   final DateTime createdAt;
 
   const GroupModel({
@@ -378,7 +379,7 @@ class GroupModel {
     this.imageUrl, required this.createdBy, this.members = const [],
     this.admins = const [], this.memberCount = 0, this.isPublic = true,
     this.tags = const [], this.location, this.isPinned = false,
-    this.chatId, required this.createdAt,
+    this.chatId, this.chatEnabled = true, required this.createdAt,
   });
 
   factory GroupModel.fromFirestore(DocumentSnapshot doc) {
@@ -398,6 +399,7 @@ class GroupModel {
       location: d['location'],
       isPinned: d['isPinned'] ?? false,
       chatId: d['chatId'],
+      chatEnabled: d['chatEnabled'] ?? true,
       createdAt: d['createdAt'] is DateTime ? d['createdAt'] : DateTime.now(),
     );
   }
@@ -407,7 +409,7 @@ class GroupModel {
     'createdBy': createdBy, 'members': members, 'admins': admins,
     'memberCount': memberCount, 'isPublic': isPublic, 'tags': tags,
     'location': location, 'isPinned': isPinned, 'chatId': chatId,
-    'createdAt': createdAt,
+    'chatEnabled': chatEnabled, 'createdAt': createdAt,
   };
 }
 

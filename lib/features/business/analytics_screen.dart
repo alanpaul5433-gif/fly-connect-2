@@ -247,7 +247,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           const SizedBox(height: 12),
 
           Consumer<EventProvider>(builder: (_, eventProvider, __) {
-            final events = eventProvider.events.take(3).toList();
+            final uid = context.read<AuthProvider>().currentUser?.uid;
+            // Scope to this business's own events — the unfiltered global
+            // list previously meant "Event Attendance" showed events other
+            // businesses created, and tapping one would open it for
+            // management regardless of who created it.
+            final events = eventProvider.events.where((e) => e.createdBy == uid).take(3).toList();
             if (events.isEmpty) {
               return Container(
                 padding: const EdgeInsets.all(20),
@@ -271,7 +276,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 final e = events[i];
               final progress = (e.rsvpCount / 50).clamp(0.0, 1.0);
               return GestureDetector(
-                onTap: () => context.push('/business-event-management'),
+                onTap: () => context.push('/business-event-management', extra: e),
                 child: Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(

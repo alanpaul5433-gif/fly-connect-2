@@ -6,6 +6,7 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../../core/constants/app_colors.dart';
 import '../../shared/models/models.dart';
 import '../../shared/providers/group_provider.dart';
+import '../../shared/providers/auth_provider.dart';
 import '../../shared/providers/chat_provider.dart';
 import '../../shared/providers/post_provider.dart';
 import '../../shared/widgets/confirm_dialog.dart';
@@ -277,7 +278,7 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
             ]),
           Expanded(child: TabBarView(controller: _tabs, children: [
             _PostsTab(posts: groupPosts),
-            _MembersTab(members: g.members),
+            _MembersTab(groupId: g.id, members: g.members, admins: g.admins),
           ])),
         ]),
       ),
@@ -366,8 +367,10 @@ class _PostCard extends StatelessWidget {
 }
 
 class _MembersTab extends StatefulWidget {
+  final String groupId;
   final List<String> members;
-  const _MembersTab({required this.members});
+  final List<String> admins;
+  const _MembersTab({required this.groupId, required this.members, required this.admins});
   @override
   State<_MembersTab> createState() => _MembersTabState();
 }
@@ -381,7 +384,14 @@ class _MembersTabState extends State<_MembersTab> {
     _members = List.from(widget.members);
   }
 
+  bool get _isAdmin {
+    final uid = context.read<AuthProvider>().currentUser?.uid;
+    return uid != null && widget.admins.contains(uid);
+  }
+
   void _removeMember(String uid) {
+    final groupProvider = context.read<GroupProvider>();
+    final messenger = ScaffoldMessenger.of(context);
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -390,11 +400,18 @@ class _MembersTabState extends State<_MembersTab> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           TextButton(
-            onPressed: () {
-              setState(() => _members.remove(uid));
+            onPressed: () async {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Member removed'), duration: Duration(seconds: 2)));
+              setState(() => _members.remove(uid));
+              try {
+                await groupProvider.removeMember(widget.groupId, uid);
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Member removed'), duration: Duration(seconds: 2)));
+              } catch (_) {
+                if (mounted) setState(() => _members.add(uid));
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Could not remove member. Try again.')));
+              }
             },
             child: const Text('Remove', style: TextStyle(color: Colors.red)),
           ),
@@ -443,13 +460,15 @@ class _MembersTabState extends State<_MembersTab> {
                 onPressed: () => context.push('/conversation/${uid}_dm?name=Member+${i + 1}'),
                 padding: EdgeInsets.zero, constraints: const BoxConstraints(),
               ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: Icon(Icons.remove_circle_outline, size: 18, color: Colors.red.shade300),
-                tooltip: 'Remove member',
-                onPressed: () => _removeMember(uid),
-                padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-              ),
+              if (_isAdmin) ...[
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: Icon(Icons.remove_circle_outline, size: 18, color: Colors.red.shade300),
+                  tooltip: 'Remove member',
+                  onPressed: () => _removeMember(uid),
+                  padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                ),
+              ],
             ]),
           );
         },

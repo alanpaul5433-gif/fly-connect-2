@@ -95,6 +95,13 @@ final GoRouter appRouter = GoRouter(
           return role == 'business' ? '/dashboard' : AppRoutes.home;
         }
 
+        // Self-heal: a business/admin account that ends up on the crew home
+        // (e.g. splash resolved the role after the initial route decision)
+        // gets corrected on the next navigation instead of staying stuck.
+        if (loc == AppRoutes.home && role != 'user') {
+          return role == 'admin' ? AppRoutes.adminDashboard : '/dashboard';
+        }
+
         if ((loc == '/dashboard' || loc == '/promotions' || loc == '/business-events') &&
             role != 'business' && role != 'admin') {
           return AppRoutes.home;
@@ -204,30 +211,30 @@ final GoRouter appRouter = GoRouter(
 
     GoRoute(path: '/create-post', builder: (_, __) => const CreatePostScreen()),
     GoRoute(path: '/business-group-management',
-      builder: (context, __) {
-        final groups = context.read<GroupProvider>().groups;
-        if (groups.isEmpty) {
-          return const NotFoundScreen(
-            title: 'No groups yet',
-            message: 'Create a group first from your dashboard to manage it.',
-          );
+      builder: (_, state) {
+        // A specific group MUST be passed via extra (e.g. from the group
+        // list tile the user tapped) — there is no safe way to guess which
+        // group to manage, and falling back to "the first group" previously
+        // meant every business user landed on the same globally-top group.
+        if (state.extra is GroupModel) {
+          return GroupManagementScreen(group: state.extra as GroupModel);
         }
-        return GroupManagementScreen(group: groups.first);
+        return const NotFoundScreen(
+          title: 'No group selected',
+          message: 'Open a group from your dashboard to manage it.',
+        );
       }),
     GoRoute(path: '/business-event-management',
-      builder: (context, state) {
-        // Prefer an event passed via GoRouter extra (from _EventCard.onPressed)
+      builder: (_, state) {
+        // A specific event MUST be passed via extra (e.g. from the event
+        // card the user tapped) — same reasoning as group management above.
         if (state.extra is EventModel) {
           return EventManagementScreen(event: state.extra as EventModel);
         }
-        final events = context.read<EventProvider>().events;
-        if (events.isEmpty) {
-          return const NotFoundScreen(
-            title: 'No events yet',
-            message: 'Create an event first from your dashboard to manage it.',
-          );
-        }
-        return EventManagementScreen(event: events.first);
+        return const NotFoundScreen(
+          title: 'No event selected',
+          message: 'Open an event from your dashboard to manage it.',
+        );
       }),
     GoRoute(path: '/business-profile',
       builder: (_, __) => const BusinessProfileScreen(isOwner: true)),
