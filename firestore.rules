@@ -12,6 +12,9 @@ service cloud.firestore {
     function isAdmin() {
       return isAuth() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
+    function isBusiness() {
+      return isAuth() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'business';
+    }
     function isNotBanned() {
       return isAuth() && !get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isBanned;
     }
@@ -118,7 +121,8 @@ service cloud.firestore {
     // ── Events ─────────────────────────────────────────────
     match /events/{eventId} {
       allow read: if isAuth();
-      allow create: if isAuth() && isNotBanned()
+      // Only business/admin accounts may create events (matches client-side gate).
+      allow create: if isAuth() && isNotBanned() && (isBusiness() || isAdmin())
         && request.resource.data.createdBy == request.auth.uid;
       // Creator may edit own fields; any authed user may bump rsvpCount
       // via the RSVP flow. Admin may approve/feature.
@@ -135,7 +139,8 @@ service cloud.firestore {
     // ── Groups ─────────────────────────────────────────────
     match /groups/{groupId} {
       allow read: if isAuth();
-      allow create: if isAuth() && isNotBanned()
+      // Only business/admin accounts may create groups (matches client-side gate).
+      allow create: if isAuth() && isNotBanned() && (isBusiness() || isAdmin())
         && request.resource.data.createdBy == request.auth.uid;
       // Admins of the group may update most fields. Joining/leaving mutates
       // members + memberCount \u2014 allow those two fields for any authed user.
