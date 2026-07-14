@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants/app_colors.dart';
@@ -15,6 +16,7 @@ class _OtpScreenState extends State<OtpScreen> {
   bool _checking = false;
   bool _resending = false;
   int _resendTimer = 30;
+  Timer? _countdown;
 
   @override
   void initState() {
@@ -22,12 +24,20 @@ class _OtpScreenState extends State<OtpScreen> {
     _startTimer();
   }
 
+  @override
+  void dispose() {
+    _countdown?.cancel();
+    super.dispose();
+  }
+
   void _startTimer() {
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted && _resendTimer > 0) {
-        setState(() => _resendTimer--);
-        _startTimer();
+    _countdown?.cancel();
+    _countdown = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_resendTimer <= 0) {
+        timer.cancel();
+        return;
       }
+      setState(() => _resendTimer--);
     });
   }
 

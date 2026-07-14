@@ -1,137 +1,121 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:flyconnect/core/constants/app_routes.dart';
+import 'package:flyconnect/shared/providers/auth_provider.dart';
+import 'package:flyconnect/shared/widgets/shared_widgets.dart';
+import 'package:flyconnect/features/auth/forgot_password_screen.dart';
 
-// We test the form without Firebase wiring by stubbing AuthProvider.
-// The real AuthProvider is a ChangeNotifier; we use a lightweight fake.
+class _MockAuthProvider extends Mock implements AuthProvider {}
 
-class _FakeAuthProvider extends ChangeNotifier {
-  bool calledReset = false;
-  String? capturedEmail;
-  bool shouldSucceed = true;
-  String? error;
+/// Pumps the real ForgotPasswordScreen. A prior version of this file tested a
+/// hand-rolled mirror of the screen's logic instead of the screen itself,
+/// which can't catch a real regression in the actual widget — replaced with
+/// a pump of the real screen, matching the rest of the auth-flow suite.
+Future<GoRouter> _pumpScreen(
+  WidgetTester tester, {
+  required _MockAuthProvider authProvider,
+}) async {
+  final router = GoRouter(
+    initialLocation: AppRoutes.forgotPassword,
+    routes: [
+      GoRoute(path: AppRoutes.forgotPassword, builder: (_, __) => const ForgotPasswordScreen()),
+      GoRoute(path: AppRoutes.login, builder: (_, __) => const Scaffold(body: Text('LOGIN'))),
+    ],
+  );
 
-  Future<bool> resetPassword(String email) async {
-    calledReset = true;
-    capturedEmail = email;
-    if (!shouldSucceed) error = 'User not found';
-    return shouldSucceed;
-  }
+  await tester.pumpWidget(
+    ChangeNotifierProvider<AuthProvider>.value(
+      value: authProvider,
+      child: MaterialApp.router(routerConfig: router),
+    ),
+  );
+  await tester.pumpAndSettle();
+  return router;
 }
 
-// Mini-harness that mimics the real ForgotPasswordScreen's form logic
-// without pulling in FirebaseAuth. We lock in the user-facing behavior:
-// - empty email -> error
-// - invalid format -> error
-// - valid -> calls resetPassword
 void main() {
-  testWidgets('empty email shows inline error',
-      (WidgetTester tester) async {
-    final auth = _FakeAuthProvider();
+  late _MockAuthProvider authProvider;
 
-    await tester.pumpWidget(
-      ChangeNotifierProvider<_FakeAuthProvider>.value(
-        value: auth,
-        child: const MaterialApp(home: _TestForgotForm()),
-      ),
-    );
-
-    await tester.tap(find.byKey(const Key('send-reset-btn')));
-    await tester.pump();
-    expect(find.textContaining('Please enter your email'), findsOneWidget);
-    expect(auth.calledReset, false);
+  setUp(() {
+    authProvider = _MockAuthProvider();
   });
 
-  testWidgets('invalid email shows validation error',
-      (WidgetTester tester) async {
-    final auth = _FakeAuthProvider();
+  testWidgets('empty email shows inline error, no resetPassword call', (tester) async {
+    await _pumpScreen(tester, authProvider: authProvider);
 
-    await tester.pumpWidget(
-      ChangeNotifierProvider<_FakeAuthProvider>.value(
-        value: auth,
-        child: const MaterialApp(home: _TestForgotForm()),
-      ),
-    );
-
-    await tester.enterText(find.byKey(const Key('email-field')), 'notanemail');
-    await tester.tap(find.byKey(const Key('send-reset-btn')));
+    await tester.tap(find.widgetWithText(PrimaryButton, 'Send Reset Link'));
     await tester.pump();
-    expect(find.textContaining('valid email'), findsOneWidget);
-    expect(auth.calledReset, false);
+
+    expect(find.text('Please enter your email address.'), findsOneWidget);
+    verifyNever(() => authProvider.resetPassword(any()));
   });
 
-  testWidgets('valid email triggers resetPassword',
-      (WidgetTester tester) async {
-    final auth = _FakeAuthProvider();
+  testWidgets('invalid email format shows inline error', (tester) async {
+    await _pumpScreen(tester, authProvider: authProvider);
 
-    await tester.pumpWidget(
-      ChangeNotifierProvider<_FakeAuthProvider>.value(
-        value: auth,
-        child: const MaterialApp(home: _TestForgotForm()),
-      ),
-    );
+    await tester.enterText(find.byType(TextField), 'notanemail');
+    await tester.tap(find.widgetWithText(PrimaryButton, 'Send Reset Link'));
+    await tester.pump();
 
-    await tester.enterText(find.byKey(const Key('email-field')), 'alex@delta.com');
-    await tester.tap(find.byKey(const Key('send-reset-btn')));
+    expect(find.text('Please enter a valid email address.'), findsOneWidget);
+    verifyNever(() => authProvider.resetPassword(any()));
+  });
+
+  testWidgets('valid email calls resetPassword and shows the success screen',
+      (tester) async {
+    when(() => authProvider.resetPassword('alex@delta.com'))
+        .thenAnswer((_) async => true);
+
+    await _pumpScreen(tester, authProvider: authProvider);
+
+    await tester.enterText(find.byType(TextField), 'alex@delta.com');
+    await tester.tap(find.widgetWithText(PrimaryButton, 'Send Reset Link'));
     await tester.pumpAndSettle();
 
-    expect(auth.calledReset, true);
-    expect(auth.capturedEmail, 'alex@delta.com');
-    expect(find.textContaining('Check your email'), findsOneWidget);
+    verify(() => authProvider.resetPassword('alex@delta.com')).called(1);
+    expect(find.text('Check your email'), findsOneWidget);
+    expect(find.textContaining('alex@delta.com'), findsOneWidget);
   });
-}
 
-/// Extracted form logic for testability — mirrors the real ForgotPasswordScreen
-/// but uses the _FakeAuthProvider so no Firebase dependency leaks into tests.
-class _TestForgotForm extends StatefulWidget {
-  const _TestForgotForm();
-  @override
-  State<_TestForgotForm> createState() => _TestForgotFormState();
-}
+  testWidgets('resetPassword failure shows AuthProvider.error, stays on the form',
+      (tester) async {
+    when(() => authProvider.resetPassword(any())).thenAnswer((_) async => false);
+    when(() => authProvider.error).thenReturn('No account found for that email.');
 
-class _TestForgotFormState extends State<_TestForgotForm> {
-  final _ctrl = TextEditingController();
-  String? _error;
-  bool _sent = false;
+    await _pumpScreen(tester, authProvider: authProvider);
 
-  Future<void> _submit() async {
-    final email = _ctrl.text.trim();
-    if (email.isEmpty) {
-      setState(() => _error = 'Please enter your email address.');
-      return;
-    }
-    final ok = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email);
-    if (!ok) {
-      setState(() => _error = 'Please enter a valid email address.');
-      return;
-    }
-    final auth = context.read<_FakeAuthProvider>();
-    final success = await auth.resetPassword(email);
-    setState(() {
-      _sent = success;
-      _error = success ? null : auth.error;
-    });
-  }
+    await tester.enterText(find.byType(TextField), 'nobody@delta.com');
+    await tester.tap(find.widgetWithText(PrimaryButton, 'Send Reset Link'));
+    await tester.pumpAndSettle();
 
-  @override
-  Widget build(BuildContext context) {
-    if (_sent) return const Scaffold(body: Center(child: Text('Check your email')));
-    return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(children: [
-          if (_error != null) Text(_error!),
-          TextField(
-            key: const Key('email-field'),
-            controller: _ctrl,
-          ),
-          ElevatedButton(
-            key: const Key('send-reset-btn'),
-            onPressed: _submit,
-            child: const Text('Send Reset Link'),
-          ),
-        ]),
-      ),
-    );
-  }
+    expect(find.text('No account found for that email.'), findsOneWidget);
+    expect(find.text('Check your email'), findsNothing);
+  });
+
+  testWidgets('"Resend email" on the success screen returns to the form',
+      (tester) async {
+    when(() => authProvider.resetPassword(any())).thenAnswer((_) async => true);
+
+    await _pumpScreen(tester, authProvider: authProvider);
+    await tester.enterText(find.byType(TextField), 'alex@delta.com');
+    await tester.tap(find.widgetWithText(PrimaryButton, 'Send Reset Link'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Resend email'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Send Reset Link'), findsOneWidget); // back on the form
+  });
+
+  testWidgets('back arrow navigates to login', (tester) async {
+    final router = await _pumpScreen(tester, authProvider: authProvider);
+
+    await tester.tap(find.byIcon(Icons.arrow_back));
+    await tester.pumpAndSettle();
+
+    expect(router.routerDelegate.currentConfiguration.uri.path, AppRoutes.login);
+  });
 }
