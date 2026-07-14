@@ -54,11 +54,13 @@ UserModel buildUser({
   String uid = 'user-1',
   String name = 'Test User',
   String role = 'user',
+  String? city,
 }) =>
     UserModel(
       uid: uid,
       name: name,
       email: '$uid@example.com',
       role: role,
+      city: city,
       createdAt: DateTime(2026, 1, 1),
     );
