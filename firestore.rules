@@ -15,6 +15,12 @@ service cloud.firestore {
     function isBusiness() {
       return isAuth() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'business';
     }
+    // Business role is self-serve at signup (see /users create above), so
+    // role alone isn't proof of a real business — require the admin-only
+    // isVerified flag too before letting an account publish content (M-3).
+    function isVerifiedBusiness() {
+      return isBusiness() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isVerified == true;
+    }
     function isNotBanned() {
       return isAuth() && !get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isBanned;
     }
@@ -37,9 +43,18 @@ service cloud.firestore {
               'name','phone','photoUrl','bio','airline','airport','position',
               'city','state','hobbies','passportStamps','travelHistory',
               'followerCount','followingCount','postCount',
-              'lastSeen','fcmToken','matchType','matchPrefs'
+              'lastSeen','matchType','matchPrefs','settings','lat','lng'
             ]));
       allow delete: if isAdmin();
+
+      // PII (email, phone, fcmToken, dob) lives here instead of on the main
+      // doc above, which any authed user can read — Firestore rules can only
+      // allow/deny a whole document, not individual fields, so keeping these
+      // off the widely-readable doc is the only way to actually restrict them.
+      match /private/{docId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId);
+      }
 
       match /following/{followedId} {
         allow read: if isAuth();
@@ -47,7 +62,10 @@ service cloud.firestore {
       }
       match /followers/{followerId} {
         allow read: if isAuth();
-        allow write: if isAuth(); // when someone follows, they write to target's followers
+        // Only the follower themself may write their own follow relationship
+        // (mirrors the posts/{postId}/likes/{userId} ownership pattern) —
+        // tightened for C-3, since this doc now drives a real push notification.
+        allow write: if isOwner(followerId) && isNotBanned() && followerId != userId;
       }
       match /blocked/{blockedId} {
         allow read, write: if isOwner(userId);
@@ -88,8 +106,13 @@ service cloud.firestore {
     // ── Chats ──────────────────────────────────────────────
     match /chats/{chatId} {
       allow read: if isAuth() && request.auth.uid in resource.data.participants;
+      // Capped at 50 for C-3: bounds the blast radius of the message
+      // notification producer (and H-3's unread-count fan-out) to an
+      // unbounded number of arbitrary uids. Chat invite/membership UX
+      // (who can be added) is a separate, pre-existing concern, out of scope here.
       allow create: if isAuth()
-        && request.auth.uid in request.resource.data.participants;
+        && request.auth.uid in request.resource.data.participants
+        && request.resource.data.participants.size() <= 50;
       // Participants may update lastMessage / unreadCount / typing metadata
       // but not change the participants list.
       allow update: if isAuth()
@@ -121,8 +144,9 @@ service cloud.firestore {
     // ── Events ─────────────────────────────────────────────
     match /events/{eventId} {
       allow read: if isAuth();
-      // Only business/admin accounts may create events (matches client-side gate).
-      allow create: if isAuth() && isNotBanned() && (isBusiness() || isAdmin())
+      // Only verified-business/admin accounts may create events (matches
+      // client-side gate). Business role alone isn't enough — see isVerifiedBusiness().
+      allow create: if isAuth() && isNotBanned() && (isVerifiedBusiness() || isAdmin())
         && request.resource.data.createdBy == request.auth.uid;
       // Creator may edit own fields; any authed user may bump rsvpCount
       // via the RSVP flow. Admin may approve/feature.
@@ -143,8 +167,9 @@ service cloud.firestore {
     // ── Groups ─────────────────────────────────────────────
     match /groups/{groupId} {
       allow read: if isAuth();
-      // Only business/admin accounts may create groups (matches client-side gate).
-      allow create: if isAuth() && isNotBanned() && (isBusiness() || isAdmin())
+      // Only verified-business/admin accounts may create groups (matches
+      // client-side gate). Business role alone isn't enough — see isVerifiedBusiness().
+      allow create: if isAuth() && isNotBanned() && (isVerifiedBusiness() || isAdmin())
         && request.resource.data.createdBy == request.auth.uid;
       // Admins of the group may update most fields. Joining/leaving mutates
       // members + memberCount \u2014 allow those two fields for any authed user.
@@ -171,11 +196,17 @@ service cloud.firestore {
             || request.auth.uid == resource.data.userB);
       allow create: if isAuth()
         && request.auth.uid == request.resource.data.userA;
-      // Only the two participants may update \u2014 and only the status/matchedAt
-      // fields (e.g. to transition 'pending' -> 'matched' / 'passed').
+      // Only the reciprocating party (userB - userA is always whoever
+      // created the pending doc, i.e. the original liker) may complete a
+      // match, and only pending -> matched. Tightened for C-3: the app
+      // never updates a match doc for any other transition (passUser()
+      // always creates a new doc rather than updating an existing one), so
+      // this is also just a more correct rule generally, not only a
+      // security tightening for the new push-notification producer.
       allow update: if isAuth()
-        && (request.auth.uid == resource.data.userA
-            || request.auth.uid == resource.data.userB)
+        && request.auth.uid == resource.data.userB
+        && resource.data.status == 'pending'
+        && request.resource.data.status == 'matched'
         && changedOnly(['status','matchedAt','chatId']);
       allow delete: if isOwner(resource.data.userA) || isAdmin();
     }
@@ -219,7 +250,10 @@ service cloud.firestore {
     // ── Promotions ─────────────────────────────────────────
     match /promotions/{promoId} {
       allow read: if isAuth();
-      allow create: if isAuth() && isNotBanned()
+      // Was missing a business-role check entirely (M-3) — any authed,
+      // non-banned user could create a promotion just by setting
+      // businessId to their own uid. Now matches events/groups.
+      allow create: if isAuth() && isNotBanned() && (isVerifiedBusiness() || isAdmin())
         && request.resource.data.businessId == request.auth.uid;
       allow update: if isOwner(resource.data.businessId) || isAdmin()
         || (isAuth() && changedOnly(['views','saves','currentRedemptions']));
