@@ -83,12 +83,18 @@ void main() {
     // Mirrors ChatProvider.sendMessage's real (non-mock) write: a batch that
     // sets the message doc and bumps unreadCount for every participant
     // other than the sender via FieldValue.increment.
-    Future<void> sendAsProvider(String senderId, List<String> participants, String text) async {
+    Future<void> sendAsProvider(String senderId, List<String> participants, String text,
+        {String? mediaUrl, String mediaType = 'text'}) async {
       final chatRef = db.collection('chats').doc(chatId);
       final msgRef = chatRef.collection('messages').doc();
       final batch = db.batch();
-      batch.set(msgRef, {'senderId': senderId, 'text': text, 'readBy': [senderId]});
-      final chatUpdate = <String, dynamic>{'lastMessage': text};
+      batch.set(msgRef, {
+        'senderId': senderId, 'text': text, 'mediaUrl': mediaUrl,
+        'mediaType': mediaType, 'readBy': [senderId],
+      });
+      final chatUpdate = <String, dynamic>{
+        'lastMessage': text.isEmpty && mediaType == 'image' ? '📷 Photo' : text,
+      };
       for (final uid in participants) {
         if (uid != senderId) chatUpdate['unreadCount.$uid'] = FieldValue.increment(1);
       }
@@ -121,6 +127,25 @@ void main() {
 
       final chat = await db.collection('chats').doc(chatId).get();
       expect(chat.data()!['unreadCount'][them], 2);
+    });
+
+    test('sending an image with no caption still increments unreadCount and shows a photo preview',
+        () async {
+      await db.collection('chats').doc(chatId).set({
+        'participants': [me, them],
+        'unreadCount': {me: 0, them: 0},
+      });
+
+      await sendAsProvider(me, [me, them], '',
+          mediaUrl: 'https://example.com/photo.jpg', mediaType: 'image');
+
+      final chat = await db.collection('chats').doc(chatId).get();
+      expect(chat.data()!['unreadCount'][them], 1);
+      expect(chat.data()!['lastMessage'], '📷 Photo');
+
+      final msgs = await db.collection('chats').doc(chatId).collection('messages').get();
+      expect(msgs.docs.first['mediaUrl'], 'https://example.com/photo.jpg');
+      expect(msgs.docs.first['mediaType'], 'image');
     });
 
     test('marking a chat read zeroes only the reader\'s unreadCount', () async {

@@ -1409,7 +1409,10 @@ class ChatProvider extends ChangeNotifier {
       'readBy': [_uid], 'createdAt': FieldValue.serverTimestamp(),
     });
     final chatUpdate = <String, dynamic>{
-      'lastMessage': text, 'lastMessageSenderId': _uid,
+      // An image sent with no caption would otherwise leave the chat list's
+      // "last message" preview blank (M-7 chat attachments).
+      'lastMessage': text.isEmpty && mediaType == 'image' ? '📷 Photo' : text,
+      'lastMessageSenderId': _uid,
       'lastMessageAt': FieldValue.serverTimestamp(),
     };
     for (final uid in participants) {
@@ -1418,6 +1421,23 @@ class ChatProvider extends ChangeNotifier {
     batch.update(chatRef, chatUpdate);
     await batch.commit();
     notifyListeners();
+  }
+
+  /// Upload a chat image to Firebase Storage and return the public download
+  /// URL. Mirrors PostProvider.uploadPostImage exactly (M-7 chat attachments).
+  /// Path: user_uploads/{uid}/chat/{timestamp}.png
+  Future<String?> uploadChatImage(Uint8List bytes) async {
+    if (isMock) return null;
+    if (_uid == null) return null;
+    try {
+      final compressed = await compressForUpload(bytes);
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final ref = FirebaseStorage.instance.ref('user_uploads/$_uid/chat/$ts.png');
+      await ref.putData(compressed, SettableMetadata(contentType: 'image/png'));
+      return await ref.getDownloadURL();
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> markAsRead(String chatId) async {
