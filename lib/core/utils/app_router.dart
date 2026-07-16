@@ -24,6 +24,7 @@ import '../../features/events/event_details_screen.dart';
 import '../../features/events/create_group_screen.dart';
 import '../../features/profile/profile_screen.dart';
 import '../../features/profile/edit_profile_screen.dart';
+import '../../features/home/saved_posts_screen.dart';
 import '../../features/profile/edit_profile_details_screen.dart';
 import '../../features/chat/chat_screen.dart';
 import '../../features/chat/conversation_screen.dart';
@@ -37,6 +38,7 @@ import '../../features/trips/trips_screen.dart';
 import '../../features/groups/groups_screen.dart';
 import '../../features/groups/group_details_screen.dart';
 import '../../features/home/create_post_screen.dart';
+import '../../features/home/post_by_id_screen.dart';
 import '../../features/business/business_shell.dart';
 import '../../features/business/group_management_screen.dart';
 import '../../features/business/event_management_screen.dart';
@@ -70,6 +72,11 @@ final _adminShellKey    = GlobalKey<NavigatorState>(debugLabel: 'admin-shell');
 final GoRouter appRouter = GoRouter(
   initialLocation: AppRoutes.splash,
   debugLogDiagnostics: false,
+  // Catches unmatched/malformed *locations* (e.g. a stale or hand-typed deep
+  // link) so they land on NotFoundScreen instead of GoRouter's raw error
+  // widget. Does not catch exceptions thrown while building an
+  // already-matched screen — that's a different failure mode.
+  errorBuilder: (_, __) => const NotFoundScreen(),
   redirect: (context, state) {
     final loc = state.matchedLocation;
 
@@ -188,6 +195,7 @@ final GoRouter appRouter = GoRouter(
     GoRoute(path: AppRoutes.notifications, builder: (_, __) => const NotificationsScreen()),
     GoRoute(path: AppRoutes.search, builder: (_, __) => const SearchScreen()),
     GoRoute(path: AppRoutes.trips, builder: (_, __) => const TripsScreen()),
+    GoRoute(path: AppRoutes.savedPosts, builder: (_, __) => const SavedPostsScreen()),
     GoRoute(path: AppRoutes.matchPreferences, builder: (_, __) => const MatchPreferencesScreen()),
     GoRoute(path: '/groups-list', builder: (_, __) => const GroupsScreen()),
 
@@ -205,6 +213,9 @@ final GoRouter appRouter = GoRouter(
 
     GoRoute(path: '/groups/:groupId',
       builder: (_, state) => GroupDetailsScreen(groupId: state.pathParameters['groupId'] ?? '')),
+
+    GoRoute(path: '/posts/:postId',
+      builder: (_, state) => PostByIdScreen(postId: state.pathParameters['postId'] ?? '')),
 
     GoRoute(path: '/passport/:userId',
       builder: (_, state) => TripsScreen(userId: state.pathParameters['userId'])),

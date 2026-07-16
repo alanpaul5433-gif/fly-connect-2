@@ -28,6 +28,7 @@ class AppRoutes {
   static const matchPreferences = '/match-preferences';
   static const safeCheckHistory = '/safe-check-history';
   static const offers           = '/offers';       // crew-facing promotions browser
+  static const savedPosts       = '/saved-posts';
 
   // Admin Dashboard
   static const adminDashboard     = '/admin/dashboard';
