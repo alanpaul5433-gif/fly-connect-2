@@ -109,7 +109,8 @@ final GoRouter appRouter = GoRouter(
           return role == 'admin' ? AppRoutes.adminDashboard : '/dashboard';
         }
 
-        if ((loc == '/dashboard' || loc == '/promotions' || loc == '/business-events') &&
+        if ((loc == '/dashboard' || loc == '/promotions' || loc == '/business-events' ||
+             loc == '/promotions/create' || loc == '/analytics' || loc == '/business-profile') &&
             role != 'business' && role != 'admin') {
           return AppRoutes.home;
         }

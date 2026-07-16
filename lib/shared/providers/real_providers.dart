@@ -22,6 +22,12 @@ const _mockCredentials = {
   'sarah@flyconnect.com':   ('sarah123',   'user'),
   'business@flyconnect.com':('business123','business'),
   'emirates@flyconnect.com':('emirates123','business'),
+  // Unverified business — exercises the "pending verification" create-gate
+  // (create_promotion_screen.dart, create_event_screen.dart,
+  // create_group_screen.dart); the other two mock business accounts are
+  // both verified, so there was previously no way to test this path without
+  // hitting real Firebase.
+  'newbiz@flyconnect.com':  ('newbiz123',  'business'),
 };
 
 UserModel _mockUserModelFor(String email, String role) {
@@ -1538,6 +1544,15 @@ class EventProvider extends ChangeNotifier {
 
   List<EventModel> get events => _events;
 
+  /// Events an ordinary user should see: only ones admin has approved. The
+  /// admin "Pending" queue was previously cosmetic — nothing else filtered
+  /// on isApproved, so every unreviewed event was already publicly visible.
+  List<EventModel> get visibleEvents => _events.where((e) => e.isApproved).toList();
+
+  /// An owning business's own events, regardless of approval state, so they
+  /// can still see/manage their own pending event on their dashboard.
+  List<EventModel> myEvents(String uid) => _events.where((e) => e.createdBy == uid).toList();
+
   /// Non-null when the events stream has reported a failure. Cleared on
   /// every successful snapshot or via [retryEvents].
   String? get eventsError => _eventsError;
@@ -2049,6 +2064,12 @@ class PromotionProvider extends ChangeNotifier {
   List<PromotionModel> get activePromotions =>
       _promotions.where((p) => p.isActive && p.isApproved).toList();
   List<PromotionModel> get expiredPromotions => _promotions.where((p) => !p.isActive).toList();
+
+  /// An owning business's own promotions, regardless of approval/active
+  /// state — used by the business's own "Crew Deals" dashboard tab, which
+  /// must not show other businesses' promotions.
+  List<PromotionModel> myPromotions(String uid) =>
+      _promotions.where((p) => p.businessId == uid).toList();
 
   PromotionProvider({this.isMock = false}) {
     if (isMock) _promotions = List.from(mockPromotions);

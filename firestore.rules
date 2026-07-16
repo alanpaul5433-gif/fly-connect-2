@@ -191,7 +191,13 @@ service cloud.firestore {
       allow delete: if isOwner(resource.data.createdBy) || isAdmin();
 
       match /rsvps/{userId} {
-        allow read: if isAuth();
+        // Previously any authed user could read any attendee's RSVP doc
+        // (name, airline, position), letting one business browse a
+        // competitor's full attendee roster. Restrict reads the same way
+        // writes already are: the attendee themselves, an admin, or the
+        // event's own creator.
+        allow read: if isOwner(userId) || isAdmin()
+          || isOwner(get(/databases/$(database)/documents/events/$(eventId)).data.createdBy);
         // The attendee manages their own RSVP; the event's creator (or an
         // admin) may also write any attendee's doc — needed for the
         // approve/decline/remove-attendee flow in event management.
@@ -315,8 +321,14 @@ service cloud.firestore {
       // Was missing a business-role check entirely (M-3) — any authed,
       // non-banned user could create a promotion just by setting
       // businessId to their own uid. Now matches events/groups.
+      // A verified business must still go through admin moderation: a
+      // non-admin create must set isApproved/isActive to false — otherwise
+      // a business could publish a live, approved promotion directly and
+      // skip review entirely.
       allow create: if isAuth() && isNotBanned() && (isVerifiedBusiness() || isAdmin())
-        && request.resource.data.businessId == request.auth.uid;
+        && request.resource.data.businessId == request.auth.uid
+        && (isAdmin() || (request.resource.data.isApproved == false
+                          && request.resource.data.isActive == false));
       // L-3: the ['views','saves','currentRedemptions'] carve-out let any
       // authed user set any of these to an arbitrary value — and no client
       // code writes any of them today (grepped real_providers.dart; the

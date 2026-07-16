@@ -40,12 +40,16 @@ class PromotionsScreen extends StatelessWidget {
           ),
         ),
         body: Consumer<PromotionProvider>(
-          builder: (context, provider, _) => TabBarView(
-            children: [
-              _PromotionList(promotions: provider.activePromotions),
-              _PromotionList(promotions: provider.expiredPromotions),
-            ],
-          ),
+          builder: (context, provider, _) {
+            final uid = context.watch<AuthProvider>().currentUser?.uid ?? '';
+            final mine = provider.myPromotions(uid);
+            return TabBarView(
+              children: [
+                _PromotionList(promotions: mine.where((p) => p.isActive && p.isApproved).toList()),
+                _PromotionList(promotions: mine.where((p) => !p.isActive).toList()),
+              ],
+            );
+          },
         ),
       ),
     );

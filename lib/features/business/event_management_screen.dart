@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/models/models.dart';
+import '../../shared/providers/auth_provider.dart';
 import '../../shared/providers/event_provider.dart';
 
 // ignore_for_file: use_build_context_synchronously
@@ -29,6 +30,11 @@ class _EventManagementScreenState extends State<EventManagementScreen>
   late String _editLocation;
 
   bool _loadingAttendees = true;
+
+  bool get _canManage {
+    final uid = context.read<AuthProvider>().currentUser?.uid;
+    return uid != null && widget.event.createdBy == uid;
+  }
 
   @override
   void initState() {
@@ -221,6 +227,7 @@ class _EventManagementScreenState extends State<EventManagementScreen>
   void dispose() { _tabs.dispose(); super.dispose(); }
 
   Future<void> _approve(UserModel u) async {
+    final messenger = ScaffoldMessenger.of(context);
     setState(() { _pending.remove(u); _approved.add(u); });
     try {
       await FirebaseFirestore.instance
@@ -232,6 +239,8 @@ class _EventManagementScreenState extends State<EventManagementScreen>
     } catch (_) {
       // Revert optimistic update on failure
       if (mounted) setState(() { _approved.remove(u); _pending.add(u); });
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Could not approve attendee. Try again.')));
       return;
     }
     if (mounted) {
@@ -241,6 +250,7 @@ class _EventManagementScreenState extends State<EventManagementScreen>
   }
 
   Future<void> _decline(UserModel u) async {
+    final messenger = ScaffoldMessenger.of(context);
     setState(() { _pending.remove(u); _declined.add(u); });
     try {
       await FirebaseFirestore.instance
@@ -251,6 +261,8 @@ class _EventManagementScreenState extends State<EventManagementScreen>
           .set({'status': 'declined'}, SetOptions(merge: true));
     } catch (_) {
       if (mounted) setState(() { _declined.remove(u); _pending.add(u); });
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Could not decline attendee. Try again.')));
       return;
     }
     if (mounted) {
@@ -263,6 +275,16 @@ class _EventManagementScreenState extends State<EventManagementScreen>
   Widget build(BuildContext context) {
     final e = widget.event;
     final fmt = DateFormat('MMM d, y');
+
+    if (!_canManage) {
+      return Scaffold(
+        appBar: AppBar(leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, size: 20, color: Colors.black),
+          onPressed: () => GoRouter.of(context).pop())),
+        body: const Center(child: Text("You don't have permission to manage this event.")),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(

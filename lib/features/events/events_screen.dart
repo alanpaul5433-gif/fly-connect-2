@@ -52,7 +52,7 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
       ),
       body: Consumer<EventProvider>(
         builder: (context, provider, _) {
-          final upcoming = provider.events.where((e) => e.isUpcoming).toList();
+          final upcoming = provider.visibleEvents.where((e) => e.isUpcoming).toList();
           final featured = upcoming.where((e) => e.isFeatured).toList();
           final upcomingList = upcoming.where((e) => !e.isFeatured).toList();
           final err = provider.eventsError;

@@ -6,6 +6,7 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/models/models.dart';
 import '../../shared/providers/event_provider.dart';
+import '../../shared/providers/auth_provider.dart';
 import '../../shared/widgets/cached_image.dart';
 
 class BusinessEventsScreen extends StatelessWidget {
@@ -40,8 +41,10 @@ class BusinessEventsScreen extends StatelessWidget {
         body: Consumer<EventProvider>(
           builder: (context, provider, _) {
             final now = DateTime.now();
-            final upcoming = provider.events.where((e) => e.date.isAfter(now)).toList();
-            final past = provider.events.where((e) => e.date.isBefore(now)).toList();
+            final uid = context.watch<AuthProvider>().currentUser?.uid ?? '';
+            final mine = provider.myEvents(uid);
+            final upcoming = mine.where((e) => e.date.isAfter(now)).toList();
+            final past = mine.where((e) => e.date.isBefore(now)).toList();
             return TabBarView(children: [
               _EventList(events: upcoming, isPast: false),
               _EventList(events: past, isPast: true),
