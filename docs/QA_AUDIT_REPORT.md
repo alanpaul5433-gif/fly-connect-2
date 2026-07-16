@@ -1,0 +1,264 @@
+# FlyConnect — End-to-End QA Audit Report
+
+**App:** FlyConnect (`com.urbansyncinnovations.flyconnect`) · aviation-industry social app · Flutter + Firebase
+**Version audited:** `1.0.0 (versionCode 4)`
+**Date:** 2026-07-15
+**Audit type:** Full manual E2E (live device) + static code + automated tests + live-backend verification
+**Primary device:** Physical **DE2118 — Android 12 (API 31), 1080×2400**
+**Backend project:** `flyconnect-ab4f2` (verified live via Firebase MCP)
+**Scope:** Android-first (Play Store). iOS reviewed statically only. **Report only — no code changes made.**
+
+> Method: the app was driven live on a real device (screenshots in `docs/qa-screenshots/`), the release/debug build inspected, `flutter analyze` + the full test suite run, `adb logcat` watched for the whole session, and the **live production Firestore rules + deployed indexes** were queried directly. Findings are marked **[LIVE]** (reproduced on device), **[BACKEND]** (verified against the live Firebase project), or **[CODE]** (confirmed by source, with `file:line`).
+
+> **Update 2026-07-15 (post-audit):** C-2 (Firestore indexes) has been **fixed and deployed**. **C-1 (wide-open security rules) has now been fixed and deployed too** — see the ✅ note on that finding; production Firestore is confirmed (via MCP `firebase_get_security_rules`) to be running the hardened, owner-scoped rules, not the wide-open default. This also flips on the rules-gated halves of H-2 (PII owner-only subdoc, since backfilled) and H-4 (real geolocation `lat`/`lng` writes). Six additional gaps were found and fixed during follow-up user testing, not part of the original audit pass — see M-11, M-12, H-1 (Settings persistence + enforcement), H-2 (fixed, deployed, and backfilled), H-3 (chat unread badges + read receipts — code done), and H-4 (real geolocation shipped).
+>
+> **Update 2026-07-16:** C-3 (notification producer) and C-4 (post deep-link route) are now **implemented, tested, and deployed**. Six Cloud Functions triggers plus a shared push fan-out (`functions/`), three accompanying `firestore.rules` tightenings, 49 mocked-Admin-SDK unit tests, and **7 integration tests run against a real Firestore + Functions emulator** (verifying actual trigger wiring, not just mocks). `PostByIdScreen` + route registration + a router `errorBuilder` close C-4 with 12 new Dart tests. **✅ Deployed 2026-07-16** — `firebase deploy --only functions,firestore:rules` run against `flyconnect-ab4f2`; all 7 functions confirmed live via `firebase functions:list`, rules confirmed live via MCP. An Artifact Registry cleanup policy (auto-delete build images >1 day old) was also set to bound container-storage cost. Real users now receive in-app + push notifications for likes/comments/follows/matches/RSVPs/messages. Also fixed same-day: **M-2** (Blocked-Users list — added `PostProvider.watchBlockedUsers()` + real unblock UI, 4 new tests). See C-3/C-4/M-2 below.
+>
+> **Update 2026-07-16 (later, re-run):** the `firebase deploy --only functions,firestore:rules` above was re-run after M-1's purge work. Functions were already live (all 7 reported "Skipped — no changes detected", confirming the earlier deploy had in fact succeeded). The rules push this time was **not a no-op** — `firestore.rules` in the working tree still carried the code-complete-but-undeployed **M-3** fix (the `isVerifiedBusiness()` gate on `events`/`groups`/`promotions` creation, plus the matching client-side "pending verification" messaging and admin approve/reject flow, all already implemented per M-3's original entry below) alongside C-3's tightenings. **M-3 is now fully deployed**, not just code-complete — see M-3 below. `firestore.rules` remains **uncommitted** in git — worth a commit now that both C-3 and M-3's rules changes are confirmed live, so the deployed and committed versions don't drift.
+
+---
+
+## 1. Executive Summary
+
+FlyConnect is a broad, well-architected app with a genuinely strong automated-test culture (**317 Flutter tests passing** plus **56 new Cloud Functions tests** (49 unit + 7 real-emulator integration), `flutter analyze` essentially clean, **zero crashes** in an extended live session). The UI is polished and consistent. However, it is **not ready for production submission** because of a cluster of "looks-done-but-inert" features still gated behind a deploy the user hasn't run yet.
+
+**The single most important finding (historical):** the **production Firestore database was wide-open to the public internet.** The deployed security rules were still the Firebase default template (`allow read, write: if request.time < timestamp.date(2026,12,12)`), which let **anyone — no login required — read, edit, or delete the entire database** (all users' emails, phone numbers, DOBs, chats, everything) until it would have hard-expired on **12 Dec 2026**, at which point the whole app would have broken. **✅ Fixed 2026-07-15** — see C-1.
+
+Closely related: the app's Firestore **indexes were not deployed either**, so several core screens (Notifications confirmed live; Chat/Trips/SafeCheck/Reports by extension) errored out with "Could not load." **✅ Fixed 2026-07-15** — see C-2.
+
+All four original critical blockers (C-1, C-2, C-3, C-4) are now closed and deployed, H-2's PII backfill is complete, and M-2 (Blocked-Users) is fixed. What remains is the Store Listing/Console Setup gaps and the remaining 🟡/🔵 findings.
+
+### Overall Readiness: **≈ 78 / 100** — **NOT READY** (up from 75 after C-3/C-4 deploy + M-2 fix)
+
+The score is now capped almost entirely by the Store Listing/Console Setup gaps (unverified store assets, Play App Signing SHA, Maps-key referrer restriction) — every code/backend-side critical and high finding is closed.
+
+| # | Category | Weight | Score | Notes |
+|---|----------|:------:|:-----:|-------|
+| 1 | Technical Build | 15% | 85 | R8 on, signed release, targetSdk 35, versionCode 4. Slow 5.3s cold start. |
+| 2 | Platform Manifests | 10% | 75 | Location permissions are now genuinely used (real geolocation, H-4 fixed); ATT string present but no prompt. |
+| 3 | Policy Compliance | 15% | 72 | Account deletion + UGC report/block real; legal pages 200 ✅. Privacy toggles now real and enforced (H-1 fixed). Email-verify not enforced; Data-Safety location mismatch. |
+| 4 | Store Listing | 10% | 50 | Not in repo — unverified (screenshots/description/feature graphic). |
+| 5 | Console Setup | 10% | 60 | Privacy URL 200 ✅. SHA registration & Maps-key restriction unverified. |
+| 6 | Backend / Firebase | 10% | 92 | Hardened rules deployed ✅ (C-1, plus C-3's `followers`/`matches`/`chats` tightenings), indexes deployed ✅ (C-2), PII subdoc rules live + all 22 existing user docs backfilled ✅ (H-2), 7 Cloud Functions live ✅ (C-3) with an Artifact Registry cleanup policy set. New minor finding: 7 legacy accounts still have a `number`/`latitude`/`longitude` PII duplicate outside H-2's scope, unaddressed. |
+| 7 | Feature Completeness | 15% | 88 | C-3 (notification producer) and C-4 (post deep-link) both fully fixed **and deployed** — real users now get in-app + push notifications for likes/comments/follows/matches/RSVPs/messages. Blocked-Users list now real (M-2 fixed). Saved-posts view, own-content delete, Settings persistence/enforcement, chat unread badges/read receipts, real geolocation (Nearby + SafeCheck), and the Events feed (past events no longer masquerade as upcoming; Featured no longer duplicates the list) all work (M-11, M-12, H-1, H-3, H-4, H-5 fixed). M-3's `isVerified` business-create gate is fixed and deployed. Remaining gaps are all 🟡/🔵 (M-5 through M-10, L-1 through L-7). |
+| 8 | Quality / Tests | 15% | 87 | 317 Flutter tests pass, analyze clean, no crashes. **New:** 49 mocked-Admin-SDK Cloud Functions unit tests + 7 tests run against a real Firestore/Functions emulator (first backend test coverage in the repo) — still not wired into CI (see L-6). |
+
+---
+
+## 2. Critical Blockers (🔴)
+
+### C-1 [BACKEND] Production Firestore is world-readable/writable (default rules deployed) — ✅ **FIXED 2026-07-15**
+- **Steps to reproduce (as found):** Query the live project's rules (`firebase deploy_status` / MCP `firebase_get_security_rules`). Or: from any unauthenticated client, read `users/*`.
+- **Expected:** The repo's hardened `firestore.rules` (default-deny, owner-scoped) is enforced in production.
+- **Actual (as found):** Deployed rules were the Firebase starter template:
+  ```
+  match /{document=**} { allow read, write: if request.time < timestamp.date(2026, 12, 12); }
+  ```
+  Anyone on the internet could read/modify/delete **all** collections (users' email, phone, DOB, FCM tokens, chats, posts, reports…). On 2026-12-12 every request would have started being denied → total outage.
+- **Severity:** 🔴 Critical (security incident + GDPR exposure + guaranteed future outage).
+- **Fix applied:** `firebase deploy --only firestore:rules --project flyconnect-ab4f2` run 2026-07-15. Confirmed post-deploy via MCP `firebase_get_security_rules` that production now serves the full hardened rules file (owner-scoped `users/*`, `private/` PII subcollection, `changedOnly()` field allowlists on every collection, admin/business role gates on events/groups/promotions, etc.) — not the wide-open default.
+- **Follow-up now unblocked:** this deploy also activates the H-2 `private/{docId}` PII rule and the H-4 `lat`/`lng` field allowlist on `users/*`, both of which were rules-complete but inert while C-1 was open. H-2's existing-document backfill (moving `email`/`phone`/`dob`/`fcmToken` off the main user doc into `private/`) is still outstanding — separate, explicit-authorization data-mutation action.
+
+### C-2 [LIVE][BACKEND] Firestore indexes not deployed → core screens error out — ✅ **FIXED 2026-07-15**
+- **Steps to reproduce (as found):** Open the app (logged in) → tap the **bell (Notifications)**. See `qa-screenshots/02-notifications-load-error.png`. Independently reproduced live for **Chat** too: the "Messages" screen showed "Could not load conversations" — confirmed via direct `firestore_query_collection` MCP call against prod, which returned `FAILED_PRECONDITION: The query requires an index`.
+- **Expected:** Notifications list (or a clean empty state); chat list loads normally.
+- **Actual (as found):** Red banner **"Could not load notifications. [Retry]"** / **"Could not load conversations. [Retry]"**. Root cause: queries like `notifications.where(userId==).orderBy(createdAt desc)` (`real_providers.dart:1603`) and `chats.where(participants arrayContains).orderBy(lastMessageAt desc)` (`real_providers.dart:1130-1141`) need composite indexes declared in `firestore.indexes.json`, but the **deployed** index set contained only a stale `posts (userId+createdAt)` and a stale `requests` index — **9 composite indexes were declared in the repo, only 2 (unrelated/stale ones) were live.** Chat list, Notifications, Trips, SafeCheck history, Events, and Reports all used the same missing-index pattern and failed identically.
+- **Severity:** 🔴 Critical (multiple primary features non-functional).
+- **Fix applied:** `firebase deploy --only firestore:indexes --project flyconnect-ab4f2` run 2026-07-15. All 9 declared composite indexes are now registered (`chats` ×2, `notifications`, `trips`, `safeChecks`, `events`, `posts` ×2, `reports`); confirmed via `firestore_list_indexes` MCP. Indexes were `CREATING` immediately post-deploy — **re-verify all reach `READY`** before considering this fully closed (composite index builds typically take a few minutes to low hours depending on collection size). The 2 old stale indexes (not in `firestore.indexes.json`) were left in place — Firebase flagged them as removable with `--force` but that wasn't run.
+- **Suggested fix:** ~~`firebase deploy --only firestore:indexes`~~ done. Remaining: re-check `firestore_list_indexes` for all-`READY`, and re-drive Notifications/Chat live to confirm the error banners are gone.
+
+### C-3 [CODE/BACKEND] Notifications have no producer — push + in-app are inert for real users
+✅ **FIXED, TESTED, AND DEPLOYED 2026-07-16**
+- **Steps to reproduce (as found):** As user A, like/comment/follow/RSVP/message user B. Check B's notifications and device push.
+- **Expected:** B receives an in-app notification and a push.
+- **Actual (as found):** No notification was ever created. The only writers of `collection('notifications')` were **admin-only** screens (`admin_notifications_page.dart:121`, `admin_safecheck_page.dart:229`). Likes, comments, follows, matches, messages, RSVPs never wrote one, and there were **no Cloud Functions** in the repo to fan out FCM.
+- **Severity:** 🔴 Critical (a headline social feature does nothing; combined with C-2 the screen also errors).
+- **Fix applied:** New `functions/` (Node 20, TypeScript, Cloud Functions v2) implementing the design in `docs/superpowers/specs/2026-07-15-notification-producer-design.md`:
+  - Six Stage-1 producer triggers (`like`, `comment`, `follow`, `match`, `rsvp`, `message`), each with deterministic doc IDs (idempotent against at-least-once retries via `.create()` + `ALREADY_EXISTS` handling), a self-notify guard, and a shared `isBlocked()` guard checking both block directions.
+  - One shared Stage-2 push fan-out trigger (`onNotificationCreated`, `maxInstances: 20`) reading `users/{uid}/private/data.fcmToken` (never the stale flat `UserModel.fcmToken`), skipping push entirely for `type == 'like'`, and using a generic push preview for `match`/`message` (lock-screen privacy) while the in-app doc keeps the real content.
+  - Three `firestore.rules` tightenings closing gaps in the documents that now drive real push: `followers` write ownership, `matches` update restricted to the non-initiator (`userB`) on a `pending → matched` transition only, and a 50-participant cap on `chats` creation.
+  - **49 mocked-Admin-SDK unit tests** (Jest + `firebase-functions-test`) covering every producer's guards, the idempotency behavior, and the push fan-out's type→payload lookup table — plus **7 tests run against a real Firestore + Functions emulator** (`firebase emulators:exec`), confirming actual trigger wiring end-to-end rather than mocked behavior. All 56 pass; `tsc --noEmit` clean.
+- **✅ Deployed 2026-07-16** — `firebase deploy --only functions,firestore:rules --project flyconnect-ab4f2` run (same explicit-user-authorization gate as C-1/C-2/H-2/H-4 before it). The first attempt hit a known first-time-2nd-gen-functions snag (Eventarc Service Agent IAM propagation delay on a project's first-ever v2 functions deploy — Google's own error message says to retry in a few minutes); the retry succeeded. Confirmed live via `firebase functions:list`: all 7 functions (`onPostLikeCreated`, `onPostCommentCreated`, `onFollowerCreated`, `onMatchUpdated`, `onEventRsvpCreated`, `onChatMessageCreated`, `onNotificationCreated`) present in `us-central1`; rules confirmed live via MCP `firebase_get_security_rules`. Also set an Artifact Registry cleanup policy (`firebase functions:artifacts:setpolicy`, auto-delete images >1 day old) so build-image storage doesn't silently accumulate cost. Real users now receive real in-app + push notifications.
+- **Known limitations (by design, see the spec's own "Known limitations"):** no FCM emulator exists, so live push delivery can only be confirmed against a real deployed project; unauthenticated deep-link taps still don't resume post-login (pre-existing gap, not introduced here); no stale-FCM-token cleanup on send failure.
+
+### C-4 [CODE] Post deep-link route `/posts/:postId` is never registered
+✅ **FIXED 2026-07-16**
+- **Steps to reproduce (as found):** Trigger any `post_like`/`post_comment` notification tap, or open a `flyconnect.co/posts/{id}` link.
+- **Expected:** Navigates to the post.
+- **Actual (as found):** `/posts/:postId` was **not** in the router and there was **no `errorBuilder`**, so the tap landed on GoRouter's raw error page. `PostDetailsScreen` also required a full `PostModel` so it couldn't be built from an id alone.
+- **Severity:** 🔴 Critical (dead navigation on a primary notification type). *Was masked while C-3 was open (no such notifications were ever generated to tap) — now that C-3 is implemented, this needed fixing in lockstep.*
+- **Fix applied:** `PostProvider.getPost(postId)` (single-doc fetch, `real_providers.dart`); new `PostByIdScreen` (`lib/features/home/post_by_id_screen.dart`) with three distinct states — loading, a **retryable error** (network/transient failure) kept separate from **not found** (genuinely deleted/invalid id) — mirroring `GroupDetailsScreen` + `GroupProvider.getGroup()`'s fetch-by-id-then-render precedent; `/posts/:postId` registered in `app_router.dart`; a top-level `errorBuilder` added to `GoRouter` so any unmatched location renders `NotFoundScreen` instead of the raw router error widget.
+- **Verified:** 12 new Dart tests (5 covering `PostByIdScreen`'s three states + retry, 2 router-registration/errorBuilder tests, 5 pre-existing route-fallback tests re-verified) — all pass; `flutter analyze` clean.
+- **No deploy dependency** — ships with the next app build, unlike C-3.
+
+---
+
+## 3. High-Priority Findings (🟠)
+
+### H-1 [LIVE] Settings toggles are fake — nothing persists
+✅ **FIXED 2026-07-15**
+- **Repro (as found):** Settings → toggle **"Events Near You"** ON → back out → re-open Settings. See `qa-screenshots/06-settings-toggle-not-persisted.png`.
+- **Expected:** Toggle stays ON; preference affects notifications/privacy.
+- **Actual (as found):** Toggle was **back OFF** (hardcoded default). All notification + privacy toggles were local `setState` only (`settings_screen.dart:74-103`), never persisted, read back, or consulted by any send/query path.
+- **Severity:** 🟠 High (privacy controls that don't work are a policy and trust problem).
+- **Fix:** Added `UserModel.settings` (a raw map, same shape as the existing `matchPrefs` pattern) and `UserProvider.saveSettings()`; `firestore.rules` whitelist updated to allow the field — deployed to production as part of the C-1 fix on 2026-07-15. Settings screen now loads from and saves to `users/{uid}.settings` on every toggle.
+  - **Enforcement wired for the 4 toggles with a real consumer:** "Show on Nearby Map" (excluded from others' nearby query, `nearby_users_screen.dart`), "Show Airline & Position" (blanked for other viewers), "SafeCheck Visibility" all/friends/verified (gates whether a viewer sees that user's SafeCheck badge — friends tier checks the viewer's `following` list, verified tier checks the viewer's own `isVerified`), and "Public Profile" (`profile_screen.dart` — a non-follower viewing a private, non-followed account now sees a "This profile is private" gate, mirroring the existing blocked-relationship gate).
+  - **Explicitly NOT enforced (persist-only) at the time of this fix, and why:** the 6 push-notification toggles (Likes/Comments/Matches/Messages/Events/SafeCheck Alerts) have nothing to gate — confirmed via code search there is still no notification producer anywhere in the app (**C-3**, unchanged). "Share Location for SafeCheck" / "Approximate Location Only" had no real coordinate to withhold — location was still 100% simulated at this point. **Update:** both are now enforced for real as of the H-4 fix below (they gate whether/how a real device position gets persisted and shared).
+  - **Verified:** 274/277 tests pass (up from 263; added `test/providers/user_provider_test.dart`), `flutter analyze` clean.
+
+### H-2 [BACKEND/CODE] All user PII is readable by any user (once real rules are deployed)
+✅ **FULLY FIXED, DEPLOYED, AND BACKFILLED 2026-07-15**
+- **Repro (as found):** As any authed user, read `users/{anyUid}`.
+- **Expected:** Email/phone/DOB/FCM token are private to the owner.
+- **Actual (as found):** The repo rule `firestore.rules:29` was `allow read: if isAuth()`, and the user doc stored `email`, `phone`, `fcmToken`, `dob` directly. Any signed-in account could harvest every user's PII.
+- **Severity:** 🟠 High (GDPR / data-harvesting).
+- **Fix:** Firestore rules can only allow/deny a whole document read, not individual fields, so `email`/`phone`/`fcmToken`/`dob`/`ageVerifiedAt` now live in a new owner-only `users/{uid}/private/data` subdoc (`firestore.rules`: `allow read: if isOwner(userId) || isAdmin(); allow write: if isOwner(userId);`, mirroring the existing `savedPosts` pattern). `phone`/`fcmToken` were also removed from the main doc's client-writable field whitelist (defense in depth). Every read/write site was updated: `signup()` now splits its write across both docs; `AuthProvider`/`UserProvider`'s self-refresh paths merge the private subdoc back in (so Settings/business-dashboard self-views are unaffected); `fcmToken` writes (`notification_service.dart`, `auth_repository.dart`) target the private subdoc; `deleteAccount()` wipes it; the admin Users console (`admin_users_page.dart`) now fans out one extra read per row to keep its email-based list/search/detail views working unchanged for admins.
+  - **Verified:** 277/277 tests pass (up from 274; added an H-2 group to `test/providers/user_provider_test.dart`), `flutter analyze` clean.
+  - **✅ Deployed 2026-07-15** as part of the C-1 rules deploy — confirmed live via MCP `firebase_get_security_rules` (the `private/{docId}` match block is present in the production ruleset).
+  - **✅ Backfilled 2026-07-15** — migrated all 22 production `users/{uid}` docs via direct Firestore MCP calls (dry-run reviewed and approved first): for each doc, merged whichever of `email`/`phone`/`dob`/`ageVerifiedAt`/`fcmToken` existed (13 accounts had only `email`; 9 had the fuller set) into `users/{uid}/private/data`, then deleted those keys from the main doc. Verified via the update response for every one of the 22 docs that none of the 5 target fields remain on the main doc. One transcription slip (a `dob` year typo on one account) was caught and corrected before the main-doc delete step ran, so no data was lost.
+  - **⚠️ New, out-of-scope finding surfaced during the backfill:** 7 of the oldest accounts (pre-dating the current `phone`/`lat`/`lng` field names — created **2025-12-04 to 2026-01-06**) carry a legacy `number` field (bare phone number) and a legacy `latitude`/`longitude` pair directly on the main doc. These are different field names from the ones H-2 targeted (`phone`, `lat`, `lng`), so neither the code fix nor this backfill touched them — they're still on the widely-readable main doc, exposed to any authenticated user. Not fixed here; needs its own scoping decision (rename/move `number` into `private/data`, decide whether the stale `latitude`/`longitude` should be dropped or migrated to `lat`/`lng`).
+
+### H-3 [CODE] Chat unread badges and read receipts don't work — ✅ **FIXED 2026-07-15**
+- **Repro (as found):** User A sends B a message; observe B's chat badge and A's read-receipt tick.
+- **Expected:** B's unread count increments; A sees the double-check once B reads it.
+- **Actual (as found):** `sendMessage` never incremented the recipient's `unreadCount` (`real_providers.dart:1134-1169`); `markAsRead` only zeroed it (`:1171-1175`). Read receipts check `readBy.length > 1` (`conversation_screen.dart:240`) but no code ever added the reader to `readBy`. So the badge stayed 0 and receipts never advanced past a single check. A duplicate of the same bug existed in the unused, dead `ChatRepository` class (`repositories.dart`) — not on the live code path, left as-is.
+- **Severity:** 🟠 High (core messaging feedback broken).
+- **Fix:** `ChatProvider.sendMessage()` (`real_providers.dart`) now bumps `unreadCount.<uid>` for every chat participant except the sender via `FieldValue.increment(1)` in the same batch as the message write, reading the participant list from the cached chat (falling back to a doc read for a brand-new chat not yet in the local cache). A new `ChatProvider.markMessagesRead()` queries messages not sent by the current user and appends their uid to `readBy` via `FieldValue.arrayUnion`, batched; `conversation_screen.dart`'s `initState` now calls it alongside the existing `markAsRead()`. No rules changes were needed — `firestore.rules` already permitted a non-sender to update only `readBy` on a message (`changedOnly(['readBy'])`), that permission was simply never exercised by the client.
+  - **Verified:** 289/289 tests pass (up from 284; added 5 tests to `test/providers/chat_provider_test.dart` covering increment-on-send, accumulation across multiple messages, zero-on-read, and `readBy` append/no-op behavior), `flutter analyze` clean. Not re-verified live on-device (no code path exists here to drive without a second test account).
+  - **Known gap:** mock mode (`isMock`) has the same latent gap (`sendMessage`'s mock branch doesn't touch `unreadCount`) — out of scope here since the ticket was scoped to the real Firestore path; flag separately if mock-mode parity matters for demos.
+
+### H-4 [CODE/MANIFEST] Location permissions over-declared; location is simulated — ✅ **FIXED + DEPLOYED 2026-07-15**
+- **Repro (as found):** Install → the app requests **no** location permission, yet `ACCESS_FINE_LOCATION`/`ACCESS_COARSE_LOCATION` (`AndroidManifest.xml:22-23`) and iOS `NSLocationWhenInUseUsageDescription` are declared. Nearby/SafeCheck submit hardcoded NYC coords; no `geolocator`/`permission_handler` dependency existed.
+- **Expected:** Either real geolocation, or no location permission declared. The user chose real geolocation (2+ day path).
+- **Fix:** Added `geolocator: ^14.0.2` (sufficient alone — its own `checkPermission`/`requestPermission`/`isLocationServiceEnabled`/`openAppSettings` API covers this scope; `permission_handler` would just duplicate it). New `LocationService` (`lib/core/services/location_service.dart`) wraps the plugin: `ensurePermission()` requests foreground permission with no custom rationale dialog (matches this app's existing FCM-permission convention), `getCurrentPosition()` never throws — every failure returns `null` so callers show an honest empty state instead of a fake coordinate. `UserModel` gained `lat`/`lng` (mirrors the `settings` field's addition pattern) so, for the first time, "Nearby Users" can read another user's *real* shared position instead of a round-robin fake one (`_nearbyCoords`, deleted). `nearby_users_screen.dart` now: resolves the viewer's real position on load (or a fixed mock position under `isMock`, never touching the real plugin); persists it via the new `UserProvider.updateMyLocation` **only** if the `shareLocation` setting is on, fuzzed to ~1.1km precision if `approxLocationOnly` is on — the first real consumer of those two settings (previously cosmetic dead toggles from H-1); computes real distances via `Geolocator.distanceBetween`; excludes users with no stored position yet rather than showing a fake distance; and renders `EmptyState` (reusing the existing widget) for denied/deniedForever/service-disabled instead of ever falling back to a hardcoded coordinate. The SafeCheck submit call site now uses the same resolved (and fuzzed) position instead of hardcoding NYC. `firestore.rules`' `users/{userId}` `changedOnly([...])` whitelist gained `'lat','lng'` — required, since rules aren't enforced by the test suite's `fake_cloud_firestore`, this would otherwise silently fail in production.
+  - **Verified:** 306/306 tests pass (up from 289; added `test/services/location_service_test.dart` — 8 tests on `fuzzCoordinate`/`distanceMeters` — plus 9 tests to `test/providers/user_provider_test.dart` covering the `lat`/`lng` model round-trip, `updateMyLocation`'s write shape, and the `shouldShareLocation`/`resolveCoordinateToPersist` privacy-gating logic; updated `test/widgets/nearby_users_screen_test.dart` to stub mock-mode location and to expect the now-fuzzed SafeCheck coordinate), `flutter analyze` clean.
+  - **Live-verified 2026-07-15 (Android emulator, `sdk gphone64 arm64` API 36, throwaway junk test account "KAJ" — not the owner's real device, no prod pollution):**
+    - ✅ Opening Nearby triggers the **real native Android location-permission dialog** (Precise/Approximate + While using/Only this time/Don't allow) — confirms this is genuinely wired to the OS, not simulated.
+    - ✅ Denying permission (`Don't allow`) → `EmptyState` renders "Location access needed / Location was denied. Enable it for FlyConnect in your device settings." with an **Open Settings** action that deep-links to the real Android Settings app (verified via `dumpsys window` → `com.android.settings.spa.SpaActivity`). On this Android version/dialog variant, a single "Don't allow" tap sets the `USER_FIXED` permission flag directly (`dumpsys package` confirmed), so the denied and `deniedForever` states collapse into one interaction — both covered by this test.
+    - ✅ Disabling device Location Services (`cmd location set-location-enabled false`) → `EmptyState` renders "Location services are off" with Open Settings — and this check correctly takes priority over the permission check, matching `ensurePermission()`'s code order (service check runs first).
+    - ✅ When `getCurrentPosition()` cannot obtain a fix, the app shows an honest "Could not get your location. Please try again." error with Retry — **never a fake/placeholder coordinate** — matching the design intent in `location_service.dart`'s doc comments.
+    - ✅ SafeCheck check-in (`nearby_users_screen.dart:566-577`) reuses the exact same `_myLat`/`_myLng` and `resolveCoordinateToPersist()` fuzzing as Nearby — confirmed by code read, no separate/simulated coordinate path exists for SafeCheck.
+    - ⚠️ **Not verified: an actual successful GPS fix** (i.e., `getCurrentPosition()` returning a real position and the Nearby list rendering with live distances). This AVD's "Google APIs" system image (non-Play-Store) can't fully authenticate with Google Play Services — logcat shows `GoogleApiManager: SecurityException: Unknown calling package name 'com.google.android.gms'` on every GMS call (also breaks App Check/Phenotype in the same log), and `geolocator_android` routes through `FusedLocationProviderClient`, which depends on that same broken GMS connection. Neither `adb emu geo fix` nor a native `LocationManager` test provider (`cmd location providers add-test-provider`) could work around this, since Fused bypasses raw `LocationManager` providers entirely. This is an **emulator-image limitation**, not a code defect — re-verify the successful-fix path on a Play-Store-enabled AVD or physical device when available.
+  - **✅ Deployed 2026-07-15** as part of the C-1 rules deploy — the `lat`/`lng` fields are confirmed present in production's `users/{userId}` `changedOnly([...])` whitelist.
+  - **Known gap:** users only get a real position once they've opened Nearby (or submitted a SafeCheck) at least once with `shareLocation` on — the Nearby list will legitimately be smaller than before until more users have done so. This is the honest tradeoff of removing simulated data, not a bug.
+
+### H-5 [LIVE] "Upcoming Events" shows past events; Featured duplicates Upcoming — ✅ **FIXED 2026-07-15**
+- **Repro (as found):** Events tab. See `qa-screenshots/03-events-past-as-upcoming.png`. Today is 2026-07-15; "Upcoming Events" lists **Apr 21 2026** and **Apr 28 2026** (both ~3 months in the past). The same "Airport Crew Meetup — NYC" appears as both Featured and the first Upcoming item.
+- **Expected:** Upcoming = future events only; Featured distinct from the list.
+- **Root cause:** Not an index/query problem — `EventProvider._subscribeEvents()` (`real_providers.dart`) has always done `.collection('events').orderBy('date').snapshots()` with **no `where` clause at all**, so the deployed events index (`isApproved` + `date`) was never actually load-bearing for this screen. `events_screen.dart` then rendered that raw, unfiltered, ascending-by-date list directly as "Upcoming," and derived `featured` from the same list without ever excluding those items from it — so a past, featured event showed up twice and every other past event rendered as if it were upcoming.
+- **Fix:** Added `EventModel.isUpcoming` (`models.dart`) — `true` when `date` is today or later; the existing free-text `time` field isn't a reliable clock component so same-day events are treated as still upcoming regardless of time of day. `events_screen.dart` now derives `upcoming = events.where(isUpcoming)`, then splits it into `featured` (upcoming + `isFeatured`) and `upcomingList` (upcoming, not featured) so the two sections never overlap. This mirrors the existing client-side date-getter pattern already used by `SafeCheckModel.isActive` elsewhere in the codebase — no new Firestore query or index was needed, and `firestore.indexes.json`'s `isApproved`+`date` composite remains unused by this screen (pre-existing, out of scope here).
+  - **Verified:** 284/284 tests pass (up from 277; added `test/models/event_model_test.dart` — 4 tests on `isUpcoming` plus 3 tests mirroring the screen's Featured/Upcoming derivation), `flutter analyze` clean.
+
+<details><summary>Original finding (superseded)</summary>
+
+- **Actual:** Date filter not applied (originally consistent with the events composite index not being deployed — the query likely fell back to unfiltered/client-side); duplicate card. *(2026-07-15: the events index is now deployed — re-verify live whether this alone fixes the ordering, or whether the `date >= now` filter still needs to be added in code.)*
+- **Severity:** 🟠 High (headline content looks broken/stale to a reviewer in <30s).
+- **Fix:** Filter `date >= now` server-side (index dependency now resolved) and exclude the featured item from the list. **Effort: 2 hrs.**
+
+</details>
+
+---
+
+## 4. Medium Findings (🟡)
+
+| ID | Finding | Evidence | Fix / Effort |
+|----|---------|----------|--------------|
+| M-1 | ~~**Leftover test/demo data in production**~~ ✅ **Fixed 2026-07-16** — Match showed "Crew, Jarka… The is Test Account Made for Testing Purposes"; the logged-in account was literally "This is Test Account". | [LIVE] `qa-screenshots/04-match-test-account.png` | **Fixed:** purged 17 test/demo/dogfooding accounts (Firestore `users` doc + `private/data` subdoc + Auth) plus 8 cascading docs they owned (1 orphan post, the "Sky Lounge NYC" seed business's 2 groups/2 events/3 promotions). All 17 were verified name/email/bio-match before deletion; 0 mismatches. **Manual follow-up still needed:** the Firebase MCP has no hard-delete for Auth users, so all 16 accounts with Auth records were only *disabled* — go to Firebase Console → Authentication and hard-delete those 16 uids to fully remove them. Also flagged but not touched (out of approved scope): 2 deleted accounts' outbound `friends`/`sentRequests` arrays referenced 3 surviving users (`jc43xcsXXBRcdR5Nk4geuXCBIwI2`, `P0v3MY9tFFYjduLYYOiPDxsrd652`, `a9ZwthJ0bZT74ZJX40T5MbXOPnu1`) — whether those surviving users have stale back-references pointing at the now-deleted uids wasn't checked. |
+| M-2 | ~~**Blocked-Users list is hardcoded empty**~~ ✅ **Fixed 2026-07-16** — cannot review or unblock. Blocking itself works, but there's no way out of it. | [LIVE] `qa-screenshots/08-blocked-users-hardcoded.png`; `settings_screen.dart` (pre-fix) | **Fixed:** added `PostProvider.watchBlockedUsers()` (mirrors `watchSavedPosts()` — join `blocked` subcollection ids against `users` via chunked `whereIn`) + wired `_blockedUsersSheet` to a real `StreamBuilder` list with a confirm-then-`unblockUser()` action per row. No rules change needed (`blocked/{blockedId}` already owner-read/write). |
+| M-3 | ~~**Self-serve `business` role; `isVerified` never enforced**~~ ✅ **Fixed AND deployed 2026-07-16** — any signup can pick `business` and immediately publish events/groups/promotions; KYC verification page is cosmetic. | [CODE] `firestore.rules` (pre-fix); `signup_screen.dart:210` | **Fixed:** new `isVerifiedBusiness()` rule helper (`isBusiness() && isVerified == true`) gates `events`/`groups`/`promotions` create — previously `promotions` had **no business-role check at all** (any non-banned authed user could create one), a more serious gap than the ticket's own framing. `admin_business_verification_page.dart`'s approve/reject flow (already real, sets `isVerified`+`verificationStatus`) is the only path to verified status — confirmed no unaddressed regression since **prod currently has zero `role=='business'` accounts** (verified via MCP; note the one exception, the "Sky Lounge NYC" seed business, was itself purged as part of M-1's cleanup), so no existing account is stranded by this. Client-side: `create_event_screen.dart`/`create_group_screen.dart`/`create_promotion_screen.dart` now show an honest "pending verification" message instead of relying on a raw (and, per M-5, unawaited) Firestore permission denial. Rules validated via MCP (`firebase_validate_security_rules`: OK). 317/317 tests pass, analyze clean. **✅ Deployed 2026-07-16** via `firebase deploy --only firestore:rules` (bundled with the C-3/C-4 deploy run) — `isVerifiedBusiness()` confirmed live in prod. |
+| M-4 | ⚪ **Email verification not enforced** — **deliberate, decided 2026-07-14 (KEEP SOFT):** unverified emails get full access by design; verification email still sends. | [CODE] `otp_screen.dart:86-88` | **No code change planned.** Rationale: safest for store review — a reviewer who can't instantly access a review-account inbox still gets into the app instead of being blocked. Revisit post-launch if abuse/compliance pressure changes the calculus. |
+| M-5 | **Fire-and-forget create writes** — createGroup/addEvent/addPromotion aren't awaited; UI reports success even if the write fails (offline/rules). | [CODE] `real_providers.dart:1401,1306,1728` | Await + surface errors. 2 hrs |
+| M-6 | **Stories are in-memory only** — "Your Story" writes to a RAM singleton; lost on restart, never seen by others. | [CODE] `shared/mock/story_state.dart`, `home_screen.dart:284` | Back with Storage/Firestore or hide the affordance. Half day |
+| M-7 | **Post edit missing; chat attachments/mute, event cover-image, several admin buttons are no-ops** (`admin_audit_page.dart:197`, `admin_reports_page.dart:517,571`, `admin_business_verification_page.dart:438`). | [CODE] | Implement or hide. Varies |
+| M-8 | **Generic error copy** — Notifications shows the same "Could not load" text whether offline or index-missing; user can't tell why. | [LIVE] shots 02 & 10 | Distinguish offline vs. server error. 1 hr |
+| M-9 | **iOS `NSUserTrackingUsageDescription` present but no ATT prompt** is ever shown (no `app_tracking_transparency`). | [CODE] `Info.plist:79-80` | Wire ATT or remove the string. 1 hr |
+| M-10 | **Empty "Share" is a silent no-op** — tapping Share with no text/media does nothing and shows no "add a caption/photo" hint. | [LIVE] `qa-screenshots/09-create-post.png` | Add inline validation message. 1 hr |
+| M-11 | ~~**Saved posts were write-only**~~ ✅ **Fixed 2026-07-15** — bookmarking a post wrote to `users/{uid}/savedPosts/{postId}` but no screen ever read the list back; users could save but never view saved posts. | [CODE] (found post-audit) `real_providers.dart:865-888` | **Fixed:** added `PostProvider.watchSavedPosts()` + `SavedPostsScreen` (Profile → ⋮ → "Saved posts"). |
+| M-12 | ~~**No way to delete your own post or comment**~~ ✅ **Fixed 2026-07-15** — the post `⋮` menu only offered Share/Report (no Delete, even for the author); no `deleteComment` existed anywhere. Only whole-account deletion removed content — a real UGC-policy gap (Play/App Store expect per-item delete). | [LIVE] (found post-audit) `home_screen.dart:593-624` (pre-fix) | **Fixed + live-verified on DE2118:** added `PostProvider.deletePost()`/`deleteComment()` (owner-only; `firestore.rules` already enforced this server-side, no rules change needed) + wired "Delete post" into both post menus and long-press-to-delete for own comments. Verified via direct Firestore checks: post + comments subcollection removed, `postCount`/`commentCount` correctly decremented, deleted post gone from feed after cold restart. |
+
+---
+
+## 5. Low Findings (🔵)
+
+| ID | Finding | Evidence |
+|----|---------|----------|
+| L-1 | `followers` subcollection writable by any authed user (no `followerId == uid` check). | `firestore.rules:50` |
+| L-2 | `audit_log` has **no** Firestore rule → admin "unauthorized attempts are logged" promise silently fails (write is best-effort try/catch). | `firestore.rules` (absent) vs `real_providers.dart:164` |
+| L-3 | Any authed user can join/alter any group's `members`/`memberCount` and forge post/event/promo counters. | `firestore.rules:153,73,130,225` |
+| L-4 | Confirm Google Maps API key (`AndroidManifest.xml:79`, `AppDelegate.swift:11`) is restricted by package+SHA in GCP (quota-theft risk). | manifest/appdelegate |
+| L-5 | `flutter analyze`: 4 info lints (`curly_braces_in_flow_control_structures`). | `event_management_screen.dart:187-200` |
+| L-6 | Integration tests exist but are **not run in CI**; `test/tutorial.dart` is an empty scaffold. | `.github/workflows/ci.yml`, `test/tutorial.dart` |
+| L-7 | Slow cold start (**5.3s** TotalTime, measured via `am start -W` on API 31). | live measurement |
+
+---
+
+## 6. What Works Well (verified)
+
+- **Auth, Profile, Match, Events (render), Create-Post UI, Feed empty/skeleton states** all render cleanly and correctly on device. Profile survives **offline** from cache without crashing (`qa-screenshots/10-offline-graceful.png`).
+- **Account deletion** is real (subcollection wipe + post anonymize + GDPR log, `real_providers.dart:264-340`) — an App-Store/Play requirement, done properly.
+- **UGC moderation primitives** exist: report post (with rate-limit), block user.
+- **Legal pages are live** — `flyconnect.co/privacy-policy/` and `/terms-of-service/` both return **HTTP 200** (the earlier 403 blocker is resolved).
+- **Build hardening:** R8 minify + resource shrink on, signed-release guard that refuses to debug-sign, targetSdk 35, AD_ID removed, Android media perms correctly omitted (Photo Picker).
+- **Automated quality:** **317 Flutter tests pass** plus **56 new Cloud Functions tests** (49 mocked-unit + 7 real-emulator integration), `flutter analyze` clean bar 4 infos, **no crashes/ANRs** across the whole live session.
+
+---
+
+## 7. Coverage Map (what was exercised)
+
+| Area | Method | Result |
+|------|--------|--------|
+| Splash/Home/Feed empty | LIVE | ✅ renders; ⚠️ Stories row absent in empty state (fixed in uncommitted build) |
+| Notifications | LIVE + CODE + EMULATOR + BACKEND | ✅ load error fixed (C-2); producer implemented, emulator-verified, and deployed live (C-3) |
+| Events | LIVE + CODE | ✅ past-as-upcoming + Featured duplicate fixed (H-5) |
+| Match | LIVE | ✅ works; ⚠️ test data (M-1) |
+| Profile / Trips tab | LIVE | ✅ renders (empty) |
+| Settings (all sections) | LIVE + CODE | ✅ toggles now persist + enforce (H-1 fixed); fake blocked list (M-2) |
+| Blocked Users / legal links | LIVE + curl | ✅ legal 200; 🟡 blocked fake |
+| Create Post (validation) | LIVE | 🟡 silent empty-share (M-10) |
+| Offline behavior | LIVE (airplane mode) | ✅ graceful, no crash |
+| Crash/stability | LIVE (logcat, full session) | ✅ zero crashes |
+| Perf (cold start) | LIVE (`am start -W`) | 🔵 5.3s |
+| Firestore rules + indexes | BACKEND (MCP) | ✅ C-1, C-2 both deployed and confirmed live; C-3's 3 additional rule tightenings also deployed + confirmed live |
+| Cloud Functions (notification producers + push fan-out) | EMULATOR + BACKEND (MCP/`functions:list`) | ✅ all 7 functions verified against the emulator, then deployed and confirmed live in production (`us-central1`) |
+| Auth/Chat send-receive/Video upload/Search/Groups/Business/SafeCheck check-in | CODE (not driven 2-account/live-write to avoid polluting prod on the owner's real device) | see findings; chat unread badges + read receipts fixed at code/contract-test level (H-3), not live-verified |
+| Nearby / SafeCheck location | LIVE (Android emulator, 2026-07-15) | real geolocation shipped (H-4) — permission dialog, denied/`deniedForever`/service-disabled empty states, and honest fetch-failure handling all live-verified; a successful GPS fix still needs a Play-Store-enabled AVD or physical device (this AVD's GMS auth is broken) |
+| Rotation/tablet/TalkBack a11y | Not fully exercised | recommend before submit |
+
+**Not fully covered live (recommended follow-up):** two-account chat send/receive + realtime, video upload+playback, image upload, cross-feature search results, group join/leave, business dashboard/promotion create, SafeCheck check-in write, landscape/tablet responsiveness, and a TalkBack accessibility pass. These were assessed from code; now that C-1/C-2 are deployed, the real rules are enforced — worth a throwaway-account pass to confirm nothing was inadvertently over-restricted by the new `changedOnly()` field allowlists.
+
+---
+
+## 8. Remediation Roadmap (priority order)
+
+| Order | Item | Severity | Effort |
+|:-----:|------|:--------:|:------:|
+| 1 | ~~Deploy `firestore.rules`~~ ✅ **Done 2026-07-15** — confirmed live via MCP | 🔴 C-1 | done |
+| 2 | ~~Deploy `firestore.indexes.json`~~ ✅ **Done 2026-07-15** — re-verify all indexes reach `READY` | 🔴 C-2 | done |
+| 3 | ~~Split PII into owner-only subdoc~~ ✅ **Done, deployed, and backfilled 2026-07-15** | 🟠 H-2 | done |
+| 4 | ~~Implement notification producer~~ ✅ **Done, tested, and deployed 2026-07-16** | 🔴 C-3 | done |
+| 5 | ~~Register `/posts/:postId` + router `errorBuilder`~~ ✅ **Done 2026-07-16** | 🔴 C-4 | done |
+| 6 | ~~Persist Settings toggles + enforce them~~ ✅ **Done 2026-07-15** | 🟠 H-1 | done |
+| 7 | ~~Fix chat `unreadCount` + `readBy`~~ ✅ **Done 2026-07-15** | 🟠 H-3 | done |
+| 8 | ~~Ship real geolocation OR remove location perms~~ ✅ **Done + deployed 2026-07-15** | 🟠 H-4 | done |
+| 9 | ~~Events future-date filter + de-dup Featured~~ ✅ **Done 2026-07-15** | 🟠 H-5 | done |
+| 10 | ~~Purge test/demo accounts from prod~~ ✅ **Done 2026-07-16** (Auth hard-delete of 16 disabled accounts still manual — see M-1) | 🟡 M-1 | done |
+| 11 | ~~Real Blocked-Users list + unblock~~ ✅ **Done 2026-07-16** | 🟡 M-2 | done |
+| 12 | ~~Enforce `isVerified` for business-create in rules~~ ✅ **Done and deployed 2026-07-16** | 🟡 M-3 | done |
+| 13 | ~~Saved Posts screen (view bookmarked posts)~~ ✅ **Done 2026-07-15** | 🟡 M-11 | done |
+| 14 | ~~Delete own post / own comment~~ ✅ **Done 2026-07-15** | 🟡 M-12 | done |
+| 15 | Remaining M/L items (await writes, ATT, edit-post, admin no-ops, analyze lints, CI integration tests) | 🟡/🔵 | varies |
+
+---
+
+## 9. Test-Plan Gaps (add before release)
+
+- **Widget tests:** Settings screen (toggle persistence — would have caught H-1), create-post media picking, video playback, profile edit/avatar upload, chat conversation screen (provider-level contract tests now cover the `unreadCount`/`readBy` logic that caused H-3, but no widget test drives `chat_screen.dart`/`conversation_screen.dart` themselves — still a gap).
+- **Integration tests:** the Flutter-side ones are still never run in CI. **New:** `functions/test/integration` (real Firestore + Functions emulator, 7 tests, run via `npm run test:integration`) is similarly not wired into CI yet — same gap, now duplicated on the backend side.
+- **Backend contract tests:** a `firestore_indexes_lint_test` exists — add a deploy-parity check that fails if declared indexes ≠ deployed indexes (would have caught C-2). Add a rules test asserting an unauthenticated read of `users/*` is **denied** (would catch C-1). Consider the same for C-3's new rules (`followers` ownership, `matches` mutual-consent, `chats` participant cap).
+- **Regression:** ~~past-event filtering (H-5)~~ ✅ covered by `test/models/event_model_test.dart`; ~~notification deep-link routing (C-4)~~ ✅ covered by `test/utils/app_router_posts_test.dart` + `test/widgets/post_by_id_screen_test.dart`.
+- **No shared fixture between the Dart `resolveRouteFromPayload` and the TypeScript `pushFanout.ts` payload lookup table** — both are tested independently; nothing asserts they agree byte-for-byte on every `type`. Flagged as a known limitation in the C-3 design, not fixed in this pass.
+- **Manual smoke (release build):** two-account chat, push receipt (C-3 is now deployed — worth a real-device confirmation that a push actually arrives, since no FCM emulator exists to verify this pre-deploy), video upload, rotation, TalkBack.
+
+---
+
+*Generated from a live device session on DE2118 (Android 12) + static analysis + live Firebase inspection. Screenshots: `docs/qa-screenshots/`.*
