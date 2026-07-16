@@ -36,6 +36,10 @@ function buildDataPayload(doc: FirebaseFirestore.DocumentData): Record<string, s
       return { type: 'match' };
     case 'event':
       return { type: 'event', eventId: str(doc.eventId) };
+    case 'group':
+      return { type: 'group', groupId: str(doc.groupId) };
+    case 'promotion':
+      return { type: 'new_promotion', promotionId: str(doc.promotionId) };
     case 'message':
       return { type: 'message', chatId: str(doc.chatId) };
     case 'admin_safecheck':

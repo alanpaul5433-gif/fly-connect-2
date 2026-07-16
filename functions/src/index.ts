@@ -6,4 +6,5 @@ export { onFollowerCreated } from './producers/follows';
 export { onMatchUpdated } from './producers/matches';
 export { onEventRsvpCreated } from './producers/rsvps';
 export { onChatMessageCreated } from './producers/messages';
+export { onPromotionApproved, onEventApproved, onGroupCreated } from './producers/businessContent';
 export { onNotificationCreated } from './pushFanout';

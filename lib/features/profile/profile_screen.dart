@@ -17,6 +17,7 @@ import '../../shared/models/models.dart';
 import '../home/story_viewer_screen.dart';
 import '../home/post_details_screen.dart';
 import '../../shared/widgets/cached_image.dart';
+import '../../shared/widgets/verified_badge.dart';
 
 class ProfileScreen extends StatefulWidget {
   final bool isOwner;
@@ -314,8 +315,19 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             ]),
             const SizedBox(height: 12),
             // Name, airline, position
-            Text(u.name, style: AppTextStyles.h4),
-            if (u.airline != null || u.position != null)
+            Row(children: [
+              Flexible(child: Text(u.name, style: AppTextStyles.h4, overflow: TextOverflow.ellipsis)),
+              if (u.isVerified) ...[const SizedBox(width: 6), const VerifiedBadge()],
+            ]),
+            if (u.role == 'business') ...[
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(color: AppColors.dark, borderRadius: BorderRadius.circular(100)),
+                child: Text(u.position ?? 'Business',
+                  style: const TextStyle(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+            ] else if (u.airline != null || u.position != null)
               Text('${u.airline ?? ''} ${u.position != null ? '· ${u.position}' : ''}',
                 style: AppTextStyles.bodyMedium.copyWith(color: AppColors.primary)),
             if (u.airport != null)

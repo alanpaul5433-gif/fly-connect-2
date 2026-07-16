@@ -6,6 +6,8 @@ import 'package:mocktail/mocktail.dart';
 import 'package:flyconnect/shared/providers/group_provider.dart';
 import 'package:flyconnect/shared/providers/auth_provider.dart';
 import 'package:flyconnect/shared/providers/post_provider.dart';
+import 'package:flyconnect/shared/providers/user_provider.dart';
+import 'package:flyconnect/shared/models/models.dart';
 import 'package:flyconnect/features/groups/group_details_screen.dart';
 
 import '../helpers/fixtures.dart';
@@ -16,12 +18,15 @@ class _MockAuthProvider extends Mock implements AuthProvider {}
 
 class _MockPostProvider extends Mock implements PostProvider {}
 
+class _MockUserProvider extends Mock implements UserProvider {}
+
 Future<GoRouter> _pumpScreen(
   WidgetTester tester, {
   required _MockGroupProvider groupProvider,
   required _MockAuthProvider authProvider,
   required _MockPostProvider postProvider,
   String groupId = 'grp-1',
+  UserModel? organizer,
 }) async {
   final router = GoRouter(
     initialLocation: '/',
@@ -34,12 +39,16 @@ Future<GoRouter> _pumpScreen(
     ],
   );
 
+  final userProvider = _MockUserProvider();
+  when(() => userProvider.fetchUser(any())).thenAnswer((_) async => organizer);
+
   await tester.pumpWidget(
     MultiProvider(
       providers: [
         ChangeNotifierProvider<GroupProvider>.value(value: groupProvider),
         ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
         ChangeNotifierProvider<PostProvider>.value(value: postProvider),
+        ChangeNotifierProvider<UserProvider>.value(value: userProvider),
       ],
       child: MaterialApp.router(routerConfig: router),
     ),
@@ -230,6 +239,40 @@ void main() {
       // The uid is re-inserted, so the member row (and its remove icon,
       // still visible since this viewer is an admin) should be back.
       expect(find.byIcon(Icons.remove_circle_outline), findsOneWidget);
+    });
+  });
+
+  group('Organizer identity (B1)', () {
+    testWidgets('shows "Hosted by" row with a verified badge for a verified business creator',
+        (tester) async {
+      final group = buildGroup(id: 'grp-1', createdBy: 'biz-1');
+      when(() => groupProvider.getGroup('grp-1')).thenAnswer((_) async => group);
+      when(() => groupProvider.isMember('grp-1')).thenReturn(false);
+      when(() => authProvider.currentUser).thenReturn(buildUser(uid: 'user-1'));
+
+      await _pumpScreen(tester,
+          groupProvider: groupProvider,
+          authProvider: authProvider,
+          postProvider: postProvider,
+          organizer: buildUser(uid: 'biz-1', name: 'Sky Lounge NYC', role: 'business', isVerified: true));
+
+      expect(find.textContaining('Hosted by Sky Lounge NYC'), findsOneWidget);
+      expect(find.byIcon(Icons.verified), findsOneWidget);
+    });
+
+    testWidgets('no organizer row when the creator cannot be resolved',
+        (tester) async {
+      final group = buildGroup(id: 'grp-1', createdBy: 'ghost-uid');
+      when(() => groupProvider.getGroup('grp-1')).thenAnswer((_) async => group);
+      when(() => groupProvider.isMember('grp-1')).thenReturn(false);
+      when(() => authProvider.currentUser).thenReturn(buildUser(uid: 'user-1'));
+
+      await _pumpScreen(tester,
+          groupProvider: groupProvider,
+          authProvider: authProvider,
+          postProvider: postProvider);
+
+      expect(find.textContaining('Hosted by'), findsNothing);
     });
   });
 }

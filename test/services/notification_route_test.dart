@@ -40,6 +40,19 @@ void main() {
           '${AppRoutes.groupDetails}/g1');
     });
 
+    test('promotion / new_promotion → /promotions/{promotionId}', () {
+      expect(
+          resolveRouteFromPayload({'type': 'promotion', 'promotionId': 'promo-1'}),
+          '/promotions/promo-1');
+      expect(
+          resolveRouteFromPayload({'type': 'new_promotion', 'promotionId': 'promo-2'}),
+          '/promotions/promo-2');
+    });
+
+    test('promotion without promotionId falls back to /offers', () {
+      expect(resolveRouteFromPayload({'type': 'promotion'}), AppRoutes.offers);
+    });
+
     test('follow → /users/{userId}', () {
       expect(
           resolveRouteFromPayload({'type': 'follow', 'userId': 'u1'}),

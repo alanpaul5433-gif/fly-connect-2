@@ -38,6 +38,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       case 'match': return Icons.favorite_border;
       case 'message': return Icons.message;
       case 'event': return Icons.event;
+      case 'group': return Icons.groups;
+      case 'promotion': return Icons.local_offer;
       default: return Icons.notifications;
     }
   }

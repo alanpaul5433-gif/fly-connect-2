@@ -55,6 +55,7 @@ UserModel buildUser({
   String name = 'Test User',
   String role = 'user',
   String? city,
+  bool isVerified = false,
 }) =>
     UserModel(
       uid: uid,
@@ -62,6 +63,7 @@ UserModel buildUser({
       email: '$uid@example.com',
       role: role,
       city: city,
+      isVerified: isVerified,
       createdAt: DateTime(2026, 1, 1),
     );
 

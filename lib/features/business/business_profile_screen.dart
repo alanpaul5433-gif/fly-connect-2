@@ -6,6 +6,7 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/providers/providers.dart';
 import '../../shared/providers/event_provider.dart';
+import '../../shared/widgets/verified_badge.dart';
 
 class BusinessProfileScreen extends StatefulWidget {
   final bool isOwner;
@@ -83,7 +84,7 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(child: Text(biz.name, style: AppTextStyles.h2)),
-              if (biz.isVerified) const Icon(Icons.verified, color: AppColors.primary, size: 22),
+              if (biz.isVerified) const VerifiedBadge(size: 22),
             ]),
             const SizedBox(height: 4),
 

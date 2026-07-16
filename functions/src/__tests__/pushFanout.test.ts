@@ -105,6 +105,30 @@ describe('onNotificationCreated (Stage 2 push fan-out)', () => {
     );
   });
 
+  it('sends group notifications with groupId in the data payload', async () => {
+    await wrapped({
+      params: { id: 'group_new_g1_u1' },
+      data: { userId: 'u1', type: 'group', title: 'New group', body: 'x', groupId: 'g1' },
+    });
+
+    expect(sendPush).toHaveBeenCalledWith(
+      'a-token',
+      expect.objectContaining({ data: { type: 'group', groupId: 'g1' } }),
+    );
+  });
+
+  it('sends promotion notifications as new_promotion with promotionId in the data payload', async () => {
+    await wrapped({
+      params: { id: 'promo_p1_u1' },
+      data: { userId: 'u1', type: 'promotion', title: 'New deal', body: 'x', promotionId: 'p1' },
+    });
+
+    expect(sendPush).toHaveBeenCalledWith(
+      'a-token',
+      expect.objectContaining({ data: { type: 'new_promotion', promotionId: 'p1' } }),
+    );
+  });
+
   it('sends admin broadcasts with no data payload (falls through to notifications on tap)', async () => {
     await wrapped({
       params: { id: 'admin-broadcast-1' },

@@ -9,9 +9,11 @@ import '../../shared/providers/group_provider.dart';
 import '../../shared/providers/auth_provider.dart';
 import '../../shared/providers/chat_provider.dart';
 import '../../shared/providers/post_provider.dart';
+import '../../shared/providers/user_provider.dart';
 import '../../shared/widgets/confirm_dialog.dart';
 import '../../shared/widgets/shared_widgets.dart';
 import '../../shared/widgets/cached_image.dart';
+import '../../shared/widgets/organizer_row.dart';
 
 class GroupDetailsScreen extends StatefulWidget {
   final String groupId;
@@ -23,6 +25,7 @@ class GroupDetailsScreen extends StatefulWidget {
 class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTickerProviderStateMixin {
   late TabController _tabs;
   GroupModel? _group;
+  UserModel? _organizer;
   bool _loading = true;
 
   @override
@@ -36,8 +39,11 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
   void dispose() { _tabs.dispose(); super.dispose(); }
 
   Future<void> _load() async {
-    final g = await context.read<GroupProvider>().getGroup(widget.groupId);
-    if (mounted) setState(() { _group = g; _loading = false; });
+    final groupProvider = context.read<GroupProvider>();
+    final userProvider = context.read<UserProvider>();
+    final g = await groupProvider.getGroup(widget.groupId);
+    final organizer = g == null ? null : await userProvider.fetchUser(g.createdBy);
+    if (mounted) setState(() { _group = g; _organizer = organizer; _loading = false; });
   }
 
   void _openGroupChat() {
@@ -259,6 +265,10 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
           // About + tags
           Padding(padding: const EdgeInsets.all(16), child: Column(
             crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (_organizer != null) ...[
+              OrganizerRow(organizer: _organizer!),
+              const SizedBox(height: 10),
+            ],
             Text(g.description, style: const TextStyle(color: Colors.black87, fontSize: 14, height: 1.5)),
             if (g.tags.isNotEmpty) ...[
               const SizedBox(height: 10),

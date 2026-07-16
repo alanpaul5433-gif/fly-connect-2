@@ -218,6 +218,12 @@ String resolveRouteFromPayload(Map<String, dynamic> data) {
       if (groupId != null) return '${AppRoutes.groupDetails}/$groupId';
       return AppRoutes.groupsList;
 
+    case 'promotion':
+    case 'new_promotion':
+      final promotionId = str('promotionId');
+      if (promotionId != null) return '/promotions/$promotionId';
+      return AppRoutes.offers;
+
     case 'follow':
     case 'follow_request':
       final userId = str('userId');

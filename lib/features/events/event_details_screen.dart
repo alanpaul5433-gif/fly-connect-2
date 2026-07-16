@@ -6,9 +6,11 @@ import 'package:intl/intl.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/providers/event_provider.dart';
+import '../../shared/providers/user_provider.dart';
 import '../../shared/models/models.dart';
 import '../../shared/widgets/shared_widgets.dart';
 import '../../shared/widgets/cached_image.dart';
+import '../../shared/widgets/organizer_row.dart';
 
 class EventDetailsScreen extends StatefulWidget {
   final String? eventId;
@@ -18,6 +20,7 @@ class EventDetailsScreen extends StatefulWidget {
 
 class _EventDetailsScreenState extends State<EventDetailsScreen> {
   EventModel? _event;
+  UserModel? _organizer;
   bool _loading = true;
   bool _hasError = false;
   bool _rsvpd = false;
@@ -33,11 +36,14 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     setState(() { _loading = true; _hasError = false; });
     if (widget.eventId == null) { setState(() => _loading = false); return; }
     try {
-      final events = context.read<EventProvider>().events;
+      final eventProvider = context.read<EventProvider>();
+      final userProvider = context.read<UserProvider>();
+      final events = eventProvider.events;
       final match = events.where((e) => e.id == widget.eventId).firstOrNull;
       if (match != null) {
-        final rsvpd = await context.read<EventProvider>().hasRsvped(match.id);
-        if (mounted) setState(() { _event = match; _rsvpd = rsvpd; _loading = false; });
+        final rsvpd = await eventProvider.hasRsvped(match.id);
+        final organizer = await userProvider.fetchUser(match.createdBy);
+        if (mounted) setState(() { _event = match; _organizer = organizer; _rsvpd = rsvpd; _loading = false; });
       } else {
         if (mounted) setState(() => _loading = false);
       }
@@ -131,6 +137,10 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
               decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(6)),
               child: const Text('FEATURED', style: TextStyle(color: AppColors.dark, fontSize: 11, fontWeight: FontWeight.w800))),
             Text(e.title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            if (_organizer != null) ...[
+              const SizedBox(height: 8),
+              OrganizerRow(organizer: _organizer!),
+            ],
             const SizedBox(height: 16),
             _InfoRow(icon: Icons.calendar_today_outlined,
               text: '${DateFormat('EEEE, MMM d, y').format(e.date)} · ${e.time}'),
