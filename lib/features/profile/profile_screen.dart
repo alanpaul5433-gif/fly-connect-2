@@ -14,7 +14,6 @@ import '../../shared/providers/post_provider.dart';
 import '../../shared/providers/chat_provider.dart';
 import '../../shared/utils/open_chat.dart';
 import '../../shared/models/models.dart';
-import '../../shared/mock/story_state.dart';
 import '../home/story_viewer_screen.dart';
 import '../home/post_details_screen.dart';
 import '../../shared/widgets/cached_image.dart';
@@ -35,6 +34,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   // If either party has blocked the other, hide the whole profile.
   // Mirrors the Nearby map's both-direction block filter.
   bool _blockedRelationship = false;
+  String? _myStoryUrl;
 
   @override
   void initState() {
@@ -51,6 +51,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       _user = userProvider.currentUser ??
           (auth.currentUser == null ? null :
           await userProvider.fetchUser(auth.currentUser!.uid));
+      if (_user != null) _myStoryUrl = await userProvider.getMyStory(_user!.uid);
     } else {
       _user = await userProvider.fetchUser(widget.userId!);
       if (_user != null && auth.currentUser != null) {
@@ -262,17 +263,22 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             Row(children: [
               GestureDetector(
                 onTap: () {
-                  if (isMe && StoryState.instance.myStoryBytes != null) {
+                  if (isMe && _myStoryUrl != null) {
+                    final userProvider = context.read<UserProvider>();
                     Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => StoryViewerScreen(user: u, imageBytes: StoryState.instance.myStoryBytes),
-                    ));
+                      builder: (_) => StoryViewerScreen(
+                          user: u, storyImageUrl: _myStoryUrl!, isOwn: true),
+                    )).then((_) async {
+                      final url = await userProvider.getMyStory(u.uid);
+                      if (mounted) setState(() => _myStoryUrl = url);
+                    });
                   }
                 },
                 child: Container(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: isMe && StoryState.instance.myStoryBytes != null
+                      color: isMe && _myStoryUrl != null
                           ? const Color(0xFFD4F53C)
                           : AppColors.primary,
                       width: 3,

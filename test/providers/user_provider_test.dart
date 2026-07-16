@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flyconnect/shared/models/models.dart';
 import 'package:flyconnect/features/nearby/nearby_users_screen.dart'
     show shouldShareLocation, resolveCoordinateToPersist;
@@ -233,6 +234,37 @@ void main() {
           40.71283, -74.00601, {'approxLocationOnly': false});
       expect(lat, 40.71283);
       expect(lng, -74.00601);
+    });
+  });
+
+  group('M-6: Stories (Firestore contract, replaces the old RAM-only StoryState)', () {
+    const uid = 'story-user-1';
+
+    test('getMyStory mirror: returns null when no story doc exists', () async {
+      final doc = await db.collection('stories').doc(uid).get();
+      expect(doc.data()?['imageUrl'], null);
+    });
+
+    test('postStory mirror: writes imageUrl + createdAt to stories/{uid}', () async {
+      // Mirrors UserProvider.postStory's Firestore write (the Storage
+      // upload itself isn't exercised here — no fake-storage package in
+      // use elsewhere in this suite).
+      await db.collection('stories').doc(uid).set({
+        'imageUrl': 'https://example.com/story.jpg',
+        'createdAt': Timestamp.now(),
+      });
+
+      final doc = await db.collection('stories').doc(uid).get();
+      expect(doc.data()!['imageUrl'], 'https://example.com/story.jpg');
+      expect(doc.data()!['createdAt'], isA<Timestamp>());
+    });
+
+    test('removeStory mirror: deletes the stories/{uid} doc', () async {
+      await db.collection('stories').doc(uid).set({'imageUrl': 'https://example.com/story.jpg'});
+      await db.collection('stories').doc(uid).delete();
+
+      final doc = await db.collection('stories').doc(uid).get();
+      expect(doc.exists, false);
     });
   });
 }

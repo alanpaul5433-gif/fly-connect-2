@@ -103,6 +103,14 @@ service cloud.firestore {
       }
     }
 
+    // ── Stories ────────────────────────────────────────────
+    // One current-story doc per user (doc id == uid), keyed by owner.
+    // M-6: replaces the old RAM-only StoryState singleton.
+    match /stories/{uid} {
+      allow read: if isAuth();
+      allow write: if isOwner(uid);
+    }
+
     // ── Chats ──────────────────────────────────────────────
     match /chats/{chatId} {
       allow read: if isAuth() && request.auth.uid in resource.data.participants;

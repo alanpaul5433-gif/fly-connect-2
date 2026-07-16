@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -16,7 +15,6 @@ import '../../shared/providers/auth_provider.dart';
 import '../../shared/providers/user_provider.dart';
 import '../../shared/providers/promotion_provider.dart';
 import '../../shared/models/models.dart';
-import '../../shared/mock/story_state.dart';
 import 'post_details_screen.dart';
 import 'story_viewer_screen.dart';
 import 'main_shell.dart' show AppDrawer;
@@ -254,36 +252,60 @@ class _StoriesRow extends StatefulWidget {
 }
 
 class _StoriesRowState extends State<_StoriesRow> {
-  Uint8List? _myStoryBytes;
+  String? _myStoryUrl;
+  bool _uploading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMyStory();
+  }
+
+  Future<void> _loadMyStory() async {
+    final uid = context.read<AuthProvider>().currentUser?.uid;
+    if (uid == null) return;
+    final url = await context.read<UserProvider>().getMyStory(uid);
+    if (mounted) setState(() => _myStoryUrl = url);
+  }
 
   Future<void> _pickMyStory() async {
+    final userProvider = context.read<UserProvider>();
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery);
-    if (picked != null) {
-      final bytes = await picked.readAsBytes();
-      StoryState.instance.myStoryBytes = bytes;
-      setState(() => _myStoryBytes = bytes);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    setState(() => _uploading = true);
+    try {
+      final url = await userProvider.postStory(bytes);
+      if (mounted) setState(() { _myStoryUrl = url; _uploading = false; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _uploading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Could not post story: $e'),
+        backgroundColor: Colors.red));
     }
   }
 
   void _viewMyStory() {
-    if (_myStoryBytes == null) return;
+    if (_myStoryUrl == null) return;
     final currentUser = context.read<AuthProvider>().currentUser;
     if (currentUser == null) return;
     Navigator.push(context, MaterialPageRoute(
       builder: (_) => StoryViewerScreen(
         user: currentUser,
-        imageBytes: _myStoryBytes,
+        storyImageUrl: _myStoryUrl!,
         isOwn: true,
       ),
-    )).then((_) => setState(() => _myStoryBytes = StoryState.instance.myStoryBytes));
+    )).then((_) => _loadMyStory());
   }
 
   @override
   Widget build(BuildContext context) {
-    // Only "Your Story" is shown until a backend-backed stories feature ships.
-    // We intentionally no longer render fake stories for other users.
-    final hasStory = _myStoryBytes != null;
+    // Only "Your Story" is shown until a backend-backed multi-user stories
+    // feed ships. We intentionally no longer render fake stories for other
+    // users — this one is real (Firestore + Storage backed), just mine-only.
+    final hasStory = _myStoryUrl != null;
     return SizedBox(
       height: 104,
       child: ListView(
@@ -293,7 +315,7 @@ class _StoriesRowState extends State<_StoriesRow> {
           Padding(
             padding: const EdgeInsets.only(right: 14),
             child: GestureDetector(
-              onTap: hasStory ? _viewMyStory : _pickMyStory,
+              onTap: _uploading ? null : (hasStory ? _viewMyStory : _pickMyStory),
               child: Column(children: [
                 Stack(children: [
                   Container(
@@ -304,9 +326,11 @@ class _StoriesRowState extends State<_StoriesRow> {
                       color: AppColors.backgroundGrey,
                     ),
                     child: ClipOval(
-                      child: hasStory
-                          ? Image.memory(_myStoryBytes!, fit: BoxFit.cover)
-                          : const Icon(Icons.person, color: AppColors.textSecondary, size: 28),
+                      child: _uploading
+                          ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                          : hasStory
+                              ? CachedFeedImage(url: _myStoryUrl!, fit: BoxFit.cover)
+                              : const Icon(Icons.person, color: AppColors.textSecondary, size: 28),
                     ),
                   ),
                   if (!hasStory)

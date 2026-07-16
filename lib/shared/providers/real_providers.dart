@@ -689,6 +689,47 @@ class UserProvider extends ChangeNotifier {
     return await ref.getDownloadURL();
   }
 
+  /// Stories (M-6: was RAM-only via a `StoryState` singleton — lost on app
+  /// restart, and never visible to anyone else since nothing ever read it
+  /// back). Deliberately "mine-only": one current-story doc per user, no
+  /// expiry/viewer-tracking/multi-user feed — a real stories feed is a much
+  /// bigger, separate feature. Mirrors [uploadProfilePhoto]'s storage-path
+  /// convention.
+  Future<String?> getMyStory(String uid) async {
+    if (isMock) return null;
+    final doc = await _db.collection('stories').doc(uid).get();
+    return doc.data()?['imageUrl'] as String?;
+  }
+
+  Future<String?> postStory(Uint8List bytes) async {
+    if (isMock) return null;
+    final uid = _currentUser?.uid;
+    if (uid == null) return null;
+    final compressed = await compressForUpload(bytes, maxDimension: 1080);
+    final ref = FirebaseStorage.instance
+        .ref('user_uploads/$uid/stories/${DateTime.now().millisecondsSinceEpoch}.jpg');
+    await ref.putData(compressed, SettableMetadata(contentType: 'image/jpeg'));
+    final url = await ref.getDownloadURL();
+    await _db.collection('stories').doc(uid).set({
+      'imageUrl': url,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    return url;
+  }
+
+  Future<void> removeStory(String uid) async {
+    if (isMock) return;
+    final ref = _db.collection('stories').doc(uid);
+    final url = (await ref.get()).data()?['imageUrl'] as String?;
+    await ref.delete();
+    // Best-effort — mirrors deletePost's swallow-and-continue storage cleanup.
+    if (url != null) {
+      try {
+        await FirebaseStorage.instance.refFromURL(url).delete();
+      } catch (_) {}
+    }
+  }
+
   /// Match preferences live under users/{uid}.matchPrefs (a nested map) so they
   /// sync across devices. The `matchPrefs` key is whitelisted in firestore.rules.
   Future<Map<String, dynamic>> getMatchPrefs(String uid) async {
