@@ -70,11 +70,15 @@ PostModel buildPost({
   String authorId = 'user-1',
   String authorName = 'Test User',
   String caption = 'A test post',
+  List<String> mediaUrls = const [],
+  String? location,
 }) =>
     PostModel(
       id: id,
       authorId: authorId,
       authorName: authorName,
       caption: caption,
+      mediaUrls: mediaUrls,
+      location: location,
       createdAt: DateTime(2026, 1, 1),
     );
