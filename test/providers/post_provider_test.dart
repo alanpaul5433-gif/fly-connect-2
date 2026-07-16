@@ -151,5 +151,168 @@ void main() {
           .collection('savedPosts').doc(postId).get();
       expect(doc.exists, false);
     });
+
+    test('watchSavedPosts contract: bookmarked ids resolve to real post docs', () async {
+      // Mirrors PostProvider.watchSavedPosts: read the bookmark ids, then
+      // fetch the matching posts via whereIn on the document id.
+      await db.collection('posts').doc('post-1').set({'caption': 'One'});
+      await db.collection('posts').doc('post-2').set({'caption': 'Two'});
+      await db.collection('users').doc(uid).collection('savedPosts')
+          .doc('post-1').set({'savedAt': Timestamp.now()});
+      await db.collection('users').doc(uid).collection('savedPosts')
+          .doc('post-2').set({'savedAt': Timestamp.now()});
+
+      final savedIds = (await db.collection('users').doc(uid)
+              .collection('savedPosts').get())
+          .docs
+          .map((d) => d.id)
+          .toList();
+      expect(savedIds, containsAll(['post-1', 'post-2']));
+
+      final posts = await db.collection('posts')
+          .where(FieldPath.documentId, whereIn: savedIds).get();
+      expect(posts.docs.length, 2);
+    });
+
+    test('a post deleted by its author disappears from a saved-ids lookup', () async {
+      // A saved bookmark can outlive the post it points to (deletePost
+      // doesn't clean up other users' savedPosts entries) — the fetch
+      // step should simply return fewer posts than bookmark ids, not error.
+      await db.collection('posts').doc(postId).set({'caption': 'Gone soon'});
+      await db.collection('users').doc(uid).collection('savedPosts')
+          .doc(postId).set({'savedAt': Timestamp.now()});
+
+      await db.collection('posts').doc(postId).delete();
+
+      final savedIds = (await db.collection('users').doc(uid)
+              .collection('savedPosts').get())
+          .docs
+          .map((d) => d.id)
+          .toList();
+      final posts = await db.collection('posts')
+          .where(FieldPath.documentId, whereIn: savedIds).get();
+      expect(posts.docs, isEmpty);
+    });
+  });
+
+  group('Delete post (owner-only)', () {
+    test('deleting a post removes its doc, comments, and likes', () async {
+      // Mirrors PostProvider.deletePost's batch: comments + likes + the post.
+      await db.collection('posts').doc(postId).set({'authorId': uid, 'postCount': 1});
+      await db.collection('posts').doc(postId).collection('comments')
+          .doc('c1').set({'authorId': 'someone', 'text': 'hi'});
+      await db.collection('posts').doc(postId).collection('likes')
+          .doc('liker-1').set({'likedAt': Timestamp.now()});
+
+      final postRef = db.collection('posts').doc(postId);
+      final comments = await postRef.collection('comments').get();
+      final likes = await postRef.collection('likes').get();
+      final batch = db.batch();
+      for (final d in comments.docs) {
+        batch.delete(d.reference);
+      }
+      for (final d in likes.docs) {
+        batch.delete(d.reference);
+      }
+      batch.delete(postRef);
+      await batch.commit();
+
+      expect((await postRef.get()).exists, false);
+      expect((await postRef.collection('comments').get()).docs, isEmpty);
+      expect((await postRef.collection('likes').get()).docs, isEmpty);
+    });
+
+    test('deleting decrements the author postCount', () async {
+      await db.collection('users').doc(uid).set({'postCount': 3});
+      await db.collection('users').doc(uid).update({
+        'postCount': FieldValue.increment(-1),
+      });
+      final user = await db.collection('users').doc(uid).get();
+      expect(user.data()!['postCount'], 2);
+    });
+  });
+
+  group('Delete comment (owner-only)', () {
+    test('deleting a comment removes its doc and decrements commentCount', () async {
+      await db.collection('posts').doc(postId).set({'commentCount': 1});
+      final commentRef = db.collection('posts').doc(postId)
+          .collection('comments').doc('c1');
+      await commentRef.set({'authorId': uid, 'text': 'nice!'});
+
+      // Mirrors PostProvider.deleteComment.
+      await commentRef.delete();
+      await db.collection('posts').doc(postId).update({
+        'commentCount': FieldValue.increment(-1),
+      });
+
+      expect((await commentRef.get()).exists, false);
+      final post = await db.collection('posts').doc(postId).get();
+      expect(post.data()!['commentCount'], 0);
+    });
+  });
+
+  group('Blocked users', () {
+    const targetUid = 'blocked-user-1';
+
+    test('blocking a user writes to the blocked subcollection', () async {
+      await db.collection('users').doc(uid).collection('blocked')
+          .doc(targetUid).set({'blockedAt': Timestamp.now()});
+
+      final doc = await db.collection('users').doc(uid)
+          .collection('blocked').doc(targetUid).get();
+      expect(doc.exists, true);
+    });
+
+    test('unblocking removes the doc', () async {
+      await db.collection('users').doc(uid).collection('blocked')
+          .doc(targetUid).set({'blockedAt': Timestamp.now()});
+      await db.collection('users').doc(uid).collection('blocked')
+          .doc(targetUid).delete();
+
+      final doc = await db.collection('users').doc(uid)
+          .collection('blocked').doc(targetUid).get();
+      expect(doc.exists, false);
+    });
+
+    test('watchBlockedUsers contract: blocked ids resolve to real user docs', () async {
+      // Mirrors PostProvider.watchBlockedUsers: read the blocked ids, then
+      // fetch the matching users via whereIn on the document id.
+      await db.collection('users').doc('blocked-1').set({'name': 'Alice'});
+      await db.collection('users').doc('blocked-2').set({'name': 'Bob'});
+      await db.collection('users').doc(uid).collection('blocked')
+          .doc('blocked-1').set({'blockedAt': Timestamp.now()});
+      await db.collection('users').doc(uid).collection('blocked')
+          .doc('blocked-2').set({'blockedAt': Timestamp.now()});
+
+      final blockedIds = (await db.collection('users').doc(uid)
+              .collection('blocked').get())
+          .docs
+          .map((d) => d.id)
+          .toList();
+      expect(blockedIds, containsAll(['blocked-1', 'blocked-2']));
+
+      final users = await db.collection('users')
+          .where(FieldPath.documentId, whereIn: blockedIds).get();
+      expect(users.docs.length, 2);
+    });
+
+    test('a user removed from the DB disappears from a blocked-ids lookup', () async {
+      // A block entry can outlive the blocked account (deleting a user
+      // doesn't clean up other users' blocked entries) — the fetch step
+      // should simply return fewer users than blocked ids, not error.
+      await db.collection('users').doc(targetUid).set({'name': 'Gone soon'});
+      await db.collection('users').doc(uid).collection('blocked')
+          .doc(targetUid).set({'blockedAt': Timestamp.now()});
+      await db.collection('users').doc(targetUid).delete();
+
+      final blockedIds = (await db.collection('users').doc(uid)
+              .collection('blocked').get())
+          .docs
+          .map((d) => d.id)
+          .toList();
+      final users = await db.collection('users')
+          .where(FieldPath.documentId, whereIn: blockedIds).get();
+      expect(users.docs.length, 0);
+    });
   });
 }

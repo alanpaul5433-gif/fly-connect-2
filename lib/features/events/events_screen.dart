@@ -52,8 +52,9 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
       ),
       body: Consumer<EventProvider>(
         builder: (context, provider, _) {
-          final events = provider.events;
-          final featured = events.where((e) => e.isFeatured).toList();
+          final upcoming = provider.events.where((e) => e.isUpcoming).toList();
+          final featured = upcoming.where((e) => e.isFeatured).toList();
+          final upcomingList = upcoming.where((e) => !e.isFeatured).toList();
           final err = provider.eventsError;
 
           return RefreshIndicator(
@@ -142,7 +143,7 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
                 child: SectionHeader(title: 'Upcoming Events', actionLabel: 'See All')),
               const SizedBox(height: 12),
 
-              if (events.isEmpty)
+              if (upcomingList.isEmpty)
                 EmptyState(
                   icon: Icons.event_outlined,
                   title: 'No events yet',
@@ -156,8 +157,8 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: events.length,
-                  itemBuilder: (_, i) => _EventListTile(event: events[i])),
+                  itemCount: upcomingList.length,
+                  itemBuilder: (_, i) => _EventListTile(event: upcomingList[i])),
               const SizedBox(height: 24),
             ]),
           );

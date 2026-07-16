@@ -47,6 +47,13 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         backgroundColor: Colors.red));
       return;
     }
+    if (auth.userRole == 'business' && !user.isVerified) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Your business account is pending verification. '
+            'You\'ll be able to create groups once an admin approves it.'),
+        backgroundColor: Colors.red));
+      return;
+    }
     setState(() => _loading = true);
     final tagsRaw = _tagsCtrl.text.trim();
     final tags = tagsRaw.isEmpty
@@ -63,12 +70,19 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       isPinned: false,
       createdAt: DateTime.now(),
     );
-    context.read<GroupProvider>().createGroup(newGroup);
-    if (mounted) {
+    try {
+      await context.read<GroupProvider>().createGroup(newGroup);
+      if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Group created successfully!'), duration: Duration(seconds: 2)));
       GoRouter.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Failed to create group: $e'),
+        backgroundColor: Colors.red));
     }
   }
 

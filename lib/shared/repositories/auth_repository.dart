@@ -93,10 +93,13 @@ class AuthRepository {
   }
 
   // ── Update FCM token ──────────────────────────────────────
+  // fcmToken lives in the owner-only private/data subdoc, not the widely
+  // readable main user doc — see H-2 in docs/QA_AUDIT_REPORT.md.
   Future<void> updateFcmToken(String token) async {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return;
-    await _db.collection('users').doc(uid).update({'fcmToken': token});
+    await _db.collection('users').doc(uid).collection('private').doc('data')
+        .set({'fcmToken': token}, SetOptions(merge: true));
   }
 
   // ── Update last seen ──────────────────────────────────────

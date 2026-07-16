@@ -67,6 +67,13 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         backgroundColor: Colors.red));
       return;
     }
+    if (auth.userRole == 'business' && !user.isVerified) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Your business account is pending verification. '
+            'You\'ll be able to create events once an admin approves it.'),
+        backgroundColor: Colors.red));
+      return;
+    }
     setState(() => _loading = true);
     final req = _requirementsCtrl.text.trim();
     final newEvent = EventModel(
@@ -82,12 +89,19 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       isFeatured: false,
       createdAt: DateTime.now(),
     );
-    context.read<EventProvider>().addEvent(newEvent);
-    if (mounted) {
+    try {
+      await context.read<EventProvider>().addEvent(newEvent);
+      if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Event created successfully!'), duration: Duration(seconds: 2)));
       GoRouter.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Failed to create event: $e'),
+        backgroundColor: Colors.red));
     }
   }
 

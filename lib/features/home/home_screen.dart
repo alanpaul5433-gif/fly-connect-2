@@ -77,6 +77,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
+        // Stories row is pinned above the feed so "Your Story"/"Nearby" stay
+        // reachable in every state — empty, loading, error, and populated.
+        // (Previously it was item 0 of the feed list and vanished whenever the
+        // feed had no posts.)
+        _StoriesRow(),
         Expanded(
           child: Selector<PostProvider, (List<PostModel>, String?, bool, bool)>(
             // Rebuild only when the feed list identity or its status flags
@@ -133,15 +138,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 onRefresh: () async => provider.listenFeed(),
                 child: ListView.separated(
                   padding: const EdgeInsets.only(bottom: 24),
-                  // posts + stories + promos + footer
-                  itemCount: posts.length + 3,
-                  separatorBuilder: (_, i) => i == 0 || i == 1
+                  // promos + posts + footer (stories are pinned outside the list)
+                  itemCount: posts.length + 2,
+                  separatorBuilder: (_, i) => i == 0
                       ? const Divider(color: AppColors.backgroundGrey, thickness: 6, height: 6)
                       : const SizedBox(height: 8),
                   itemBuilder: (context, i) {
-                    if (i == 0) return _StoriesRow();
-                    if (i == 1) return const _PromoStrip();
-                    if (i == posts.length + 2) {
+                    if (i == 0) return const _PromoStrip();
+                    if (i == posts.length + 1) {
                       // Footer: load-more or end-of-feed indicator
                       return Padding(
                         padding: const EdgeInsets.symmetric(
@@ -192,7 +196,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       );
                     }
-                    return _PostCard(post: posts[i - 2], index: i - 2);
+                    return _PostCard(post: posts[i - 1], index: i - 1);
                   },
                 ),
               );
@@ -586,7 +590,11 @@ class _PostCardState extends State<_PostCard> {
     ));
   }
 
+  bool get _isOwnPost =>
+      context.read<AuthProvider>().currentUser?.uid == widget.post.authorId;
+
   void _showOptions() {
+    final isOwn = _isOwnPost;
     showModalBottomSheet(context: context, shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -598,26 +606,56 @@ class _PostCardState extends State<_PostCard> {
           leading: const Icon(Icons.link),
           title: const Text('Copy link'),
           onTap: () { Navigator.pop(context); _copyPostLink(); }),
-        ListTile(leading: const Icon(Icons.flag_outlined, color: Colors.red),
-          title: const Text('Report post', style: TextStyle(color: Colors.red)),
-          onTap: () async {
-            Navigator.pop(context);
-            final messenger = ScaffoldMessenger.of(context);
-            try {
-              await context.read<PostProvider>().reportPost(widget.post.id);
-              messenger.showSnackBar(const SnackBar(
-                content: Text('Post reported. Our team will review it.'),
-                backgroundColor: Colors.red,
-              ));
-            } catch (e) {
-              // Likely the rate-limit guard — surface to the user
-              messenger.showSnackBar(SnackBar(
-                content: Text(e.toString().replaceFirst('Exception: ', '')),
-                backgroundColor: Colors.orange,
-              ));
-            }
-          }),
+        if (isOwn)
+          ListTile(leading: const Icon(Icons.delete_outline, color: Colors.red),
+            title: const Text('Delete post', style: TextStyle(color: Colors.red)),
+            onTap: () { Navigator.pop(context); _confirmDeletePost(); })
+        else
+          ListTile(leading: const Icon(Icons.flag_outlined, color: Colors.red),
+            title: const Text('Report post', style: TextStyle(color: Colors.red)),
+            onTap: () async {
+              Navigator.pop(context);
+              final messenger = ScaffoldMessenger.of(context);
+              try {
+                await context.read<PostProvider>().reportPost(widget.post.id);
+                messenger.showSnackBar(const SnackBar(
+                  content: Text('Post reported. Our team will review it.'),
+                  backgroundColor: Colors.red,
+                ));
+              } catch (e) {
+                // Likely the rate-limit guard — surface to the user
+                messenger.showSnackBar(SnackBar(
+                  content: Text(e.toString().replaceFirst('Exception: ', '')),
+                  backgroundColor: Colors.orange,
+                ));
+              }
+            }),
       ])));
+  }
+
+  Future<void> _confirmDeletePost() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete post?'),
+        content: const Text("This can't be undone."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red))),
+        ],
+      ));
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<PostProvider>().deletePost(widget.post.id,
+        mediaUrls: widget.post.mediaUrls, thumbnailUrl: widget.post.thumbnailUrl);
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Could not delete post. Please try again.'),
+        backgroundColor: Colors.red,
+      ));
+    }
   }
 
   @override
@@ -679,7 +717,11 @@ class _PostCardState extends State<_PostCard> {
                 ))
             : Container(
                 height: 180,
-                color: Colors.primaries[widget.index % Colors.primaries.length].withValues(alpha: 0.15),
+                width: double.infinity, // fill the row; otherwise the tint
+                // shrink-wraps to the caption text and looks half-width.
+                // Text-only posts share one subtle, on-brand navy tint instead
+                // of a random Material colour per index (which read as broken).
+                color: AppColors.dark.withValues(alpha: 0.05),
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

@@ -28,6 +28,11 @@ class UserModel {
   final bool isBanned;
   final DateTime createdAt;
   final DateTime? lastSeen;
+  final Map<String, dynamic> settings;
+  // Last-known shared position (Nearby/SafeCheck), written only when the
+  // user's 'shareLocation' setting is on — see LocationService/H-4.
+  final double? lat;
+  final double? lng;
 
   const UserModel({
     required this.uid, required this.name, required this.email,
@@ -38,6 +43,7 @@ class UserModel {
     this.followerCount = 0, this.followingCount = 0, this.postCount = 0,
     this.fcmToken, this.role = 'user', this.isVerified = false,
     this.isBanned = false, required this.createdAt, this.lastSeen,
+    this.settings = const {}, this.lat, this.lng,
   });
 
   factory UserModel.fromMap(Map<String, dynamic> d, String id) => UserModel(
@@ -56,6 +62,8 @@ class UserModel {
     isVerified: d['isVerified'] ?? false, isBanned: d['isBanned'] ?? false,
     createdAt: d['createdAt'] is DateTime ? d['createdAt'] : DateTime.now(),
     lastSeen: d['lastSeen'] is DateTime ? d['lastSeen'] : null,
+    settings: Map<String, dynamic>.from(d['settings'] ?? {}),
+    lat: (d['lat'] as num?)?.toDouble(), lng: (d['lng'] as num?)?.toDouble(),
   );
 
   Map<String, dynamic> toMap() => {
@@ -67,6 +75,7 @@ class UserModel {
     'followingCount': followingCount, 'postCount': postCount,
     'fcmToken': fcmToken, 'role': role, 'isVerified': isVerified,
     'isBanned': isBanned, 'createdAt': createdAt, 'lastSeen': lastSeen,
+    'settings': settings, 'lat': lat, 'lng': lng,
   };
 
   factory UserModel.fromFirestore(DocumentSnapshot doc) {
@@ -84,6 +93,7 @@ class UserModel {
     List<String>? hobbies, List<String>? passportStamps,
     List<String>? travelHistory, String? matchType, String? fcmToken,
     int? followerCount, int? followingCount, int? postCount,
+    Map<String, dynamic>? settings, double? lat, double? lng,
   }) => UserModel(
     uid: uid, email: email, createdAt: createdAt, phone: phone,
     name: name ?? this.name, photoUrl: photoUrl ?? this.photoUrl,
@@ -98,6 +108,8 @@ class UserModel {
     followerCount: followerCount ?? this.followerCount,
     followingCount: followingCount ?? this.followingCount,
     postCount: postCount ?? this.postCount,
+    settings: settings ?? this.settings,
+    lat: lat ?? this.lat, lng: lng ?? this.lng,
     role: role, isVerified: isVerified, isBanned: isBanned,
   );
 }
@@ -323,6 +335,15 @@ class EventModel {
     this.isFeatured = false, this.requirements = const [],
     required this.createdAt,
   });
+
+  /// True if [date] is today or later. `time` is a free-text field (not a
+  /// reliable DateTime component), so today's events count as upcoming
+  /// regardless of what time it currently is.
+  bool get isUpcoming {
+    final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
+    return !date.isBefore(startOfToday);
+  }
 
   factory EventModel.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;

@@ -49,15 +49,35 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _pickPhoto() async {
-    final picker = ImagePicker();
-    final img = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.photo_library_outlined),
+            title: const Text('Choose from gallery'),
+            onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
+          ListTile(
+            leading: const Icon(Icons.camera_alt_outlined),
+            title: const Text('Take a photo'),
+            onTap: () => Navigator.pop(ctx, ImageSource.camera)),
+        ]),
+      ),
+    );
+    if (source == null) return;
+    final img = await ImagePicker().pickImage(source: source, imageQuality: 80);
     if (img != null) setState(() => _pickedImage = File(img.path));
   }
 
   Future<void> _save() async {
-    setState(() => _saving = true);
+    // Capture the provider before any await — using `context` across an async
+    // gap is unsafe (the widget may unmount mid-upload).
+    final userProvider = context.read<UserProvider>();
     final uid = context.read<AuthProvider>().currentUser?.uid;
     if (uid == null) return;
+    setState(() => _saving = true);
     final updates = <String, dynamic>{
       'name': _nameCtrl.text.trim(),
       'bio': _bioCtrl.text.trim(),
@@ -68,7 +88,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       'state': _stateCtrl.text.trim(),
     };
     try {
-      await context.read<UserProvider>().updateProfile(uid, updates);
+      // Upload the newly-picked avatar first; only add photoUrl to the update
+      // if it succeeds. A failed upload throws → the catch below reports it,
+      // instead of silently saving the rest and dropping the photo.
+      if (_pickedImage != null) {
+        final url = await userProvider.uploadProfilePhoto(await _pickedImage!.readAsBytes());
+        if (url != null) updates['photoUrl'] = url;
+      }
+      await userProvider.updateProfile(uid, updates);
       if (!mounted) return;
       setState(() => _saving = false);
       Navigator.pop(context);

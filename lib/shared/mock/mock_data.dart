@@ -336,6 +336,11 @@ final mockTrips = [
     createdAt: DateTime.now().subtract(const Duration(days: 88))),
 ];
 
+// Mock mode never touches the real geolocator plugin — Nearby/SafeCheck use
+// this fixed "you are here" point instead, matching the same NYC cluster the
+// mock SafeCheck fixtures below already sit in.
+const mockMyLocation = (40.7128, -74.0060);
+
 // ─── Mock SafeCheck Data ─────────────────────────────────────
 final mockSafeChecks = [
   SafeCheckModel(id: 'sc_001', userId: 'user_002', userName: 'Maria Chen',

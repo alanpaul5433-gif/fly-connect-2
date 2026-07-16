@@ -64,3 +64,17 @@ UserModel buildUser({
       city: city,
       createdAt: DateTime(2026, 1, 1),
     );
+
+PostModel buildPost({
+  String id = 'post-1',
+  String authorId = 'user-1',
+  String authorName = 'Test User',
+  String caption = 'A test post',
+}) =>
+    PostModel(
+      id: id,
+      authorId: authorId,
+      authorName: authorName,
+      caption: caption,
+      createdAt: DateTime(2026, 1, 1),
+    );

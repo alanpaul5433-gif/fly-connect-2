@@ -155,4 +155,37 @@ void main() {
       expect(data['sentAt'], isA<Timestamp>());
     });
   });
+
+  group('createGroup', () {
+    // Mirrors GroupProvider.createGroup (M-5: now awaited so a rules
+    // rejection or offline failure propagates to the caller instead of
+    // being silently dropped after the UI already reported success).
+    Future<String> createGroupMirror(Map<String, dynamic> data) async {
+      final ref = db.collection('groups').doc();
+      await ref.set(data);
+      return ref.id;
+    }
+
+    test('writes a new doc to the groups collection', () async {
+      final id = await createGroupMirror({'name': 'Crew Deals', 'createdBy': 'biz-1'});
+
+      final doc = await db.collection('groups').doc(id).get();
+      expect(doc.exists, true);
+      expect(doc.data()!['name'], 'Crew Deals');
+    });
+
+    test('the returned id is the real Firestore doc id, not a client placeholder', () async {
+      // Regression: the model's own client-generated 'grp_...' id is never
+      // persisted (see GroupModel.toFirestore/fromFirestore) — the real id
+      // only exists on the DocumentReference Firestore hands back. Tracking
+      // the wrong one meant the creator's own group never matched in
+      // "My Groups" once the snapshot listener loaded it back by real id.
+      const placeholderId = 'grp_1234567890';
+      final realId = await createGroupMirror({'name': 'Crew Deals', 'createdBy': 'biz-1'});
+
+      expect(realId, isNot(placeholderId));
+      final doc = await db.collection('groups').doc(realId).get();
+      expect(doc.exists, true);
+    });
+  });
 }

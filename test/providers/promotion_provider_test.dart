@@ -86,4 +86,18 @@ void main() {
     expect(snap.docs.first.data()['businessId'], realUid);
     expect(snap.docs.first.data()['businessId'], isNot('biz_001'));
   });
+
+  test('addPromotion mirror: writes a new doc to the promotions collection', () async {
+    // Mirrors PromotionProvider.addPromotion (M-5: now awaited so a rules
+    // rejection or offline failure propagates to the caller instead of
+    // being silently dropped after the UI already reported success).
+    await db.collection('promotions').doc().set({
+      'businessId': 'biz-1',
+      'title': 'Crew discount',
+    });
+
+    final snap = await db.collection('promotions').get();
+    expect(snap.docs, hasLength(1));
+    expect(snap.docs.first.data()['title'], 'Crew discount');
+  });
 }

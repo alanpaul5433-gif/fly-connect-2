@@ -147,10 +147,15 @@ class NotificationService {
 
   Future<void> _saveToken(String uid, String token) async {
     try {
+      // fcmToken is PII-adjacent (a push token identifying this device) and
+      // lives in the owner-only private/data subdoc, not the widely-readable
+      // main user doc — see H-2 in docs/QA_AUDIT_REPORT.md.
       await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
-          .update({'fcmToken': token});
+          .collection('private')
+          .doc('data')
+          .set({'fcmToken': token}, SetOptions(merge: true));
     } catch (e) {
       // Doc may not exist yet (first sign-up); the auth listener will retry
       // the next time it fires. Log so a *persistent* failure (which means no

@@ -75,7 +75,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(gradient: AppColors.splashGradient),
+        color: Colors.black, // #000000 — matches the app icon background seamlessly
         child: Center(
           child: FadeTransition(
             opacity: _fadeAnim,
@@ -88,7 +88,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                 ),
                 if (kDebugMode) ...[
                   const SizedBox(height: 16),
-                  Text('DEBUG MODE', style: TextStyle(color: AppColors.dark.withValues(alpha: 0.6),
+                  Text('DEBUG MODE', style: TextStyle(color: AppColors.textSecondary.withValues(alpha: 0.8),
                     fontSize: 11, letterSpacing: 2)),
                 ],
               ]),

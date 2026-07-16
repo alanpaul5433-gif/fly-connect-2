@@ -172,18 +172,23 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
               return SliverList(delegate: SliverChildBuilderDelegate(
                 (context, i) {
                   final c = comments[i];
-                  return ListTile(
-                    leading: CachedAvatar(
-                      url: c.authorPhotoUrl,
-                      radius: 16,
-                      backgroundColor: AppColors.dark,
-                      fallback: Text(c.authorName.isNotEmpty ? c.authorName[0] : '?', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                  final isOwnComment =
+                      context.read<AuthProvider>().currentUser?.uid == c.authorId;
+                  return GestureDetector(
+                    onLongPress: isOwnComment ? () => _confirmDeleteComment(c.id) : null,
+                    child: ListTile(
+                      leading: CachedAvatar(
+                        url: c.authorPhotoUrl,
+                        radius: 16,
+                        backgroundColor: AppColors.dark,
+                        fallback: Text(c.authorName.isNotEmpty ? c.authorName[0] : '?', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ),
+                      title: RichText(text: TextSpan(style: const TextStyle(color: Colors.black, fontSize: 13), children: [
+                        TextSpan(text: '${c.authorName} ', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        TextSpan(text: c.text),
+                      ])),
+                      subtitle: Text(timeago.format(c.createdAt), style: const TextStyle(fontSize: 11)),
                     ),
-                    title: RichText(text: TextSpan(style: const TextStyle(color: Colors.black, fontSize: 13), children: [
-                      TextSpan(text: '${c.authorName} ', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      TextSpan(text: c.text),
-                    ])),
-                    subtitle: Text(timeago.format(c.createdAt), style: const TextStyle(fontSize: 11)),
                   );
                 },
                 childCount: comments.length,
@@ -218,27 +223,86 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
     );
   }
 
+  bool get _isOwnPost =>
+      context.read<AuthProvider>().currentUser?.uid == widget.post.authorId;
+
   void _showOptions(BuildContext context) {
+    final isOwn = _isOwnPost;
     showModalBottomSheet(context: context, builder: (_) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      ListTile(leading: const Icon(Icons.flag_outlined, color: Colors.red), title: const Text('Report post'),
-        onTap: () async {
-          Navigator.pop(context);
-          final messenger = ScaffoldMessenger.of(context);
-          try {
-            await context.read<PostProvider>().reportPost(widget.post.id);
-            messenger.showSnackBar(const SnackBar(
-              content: Text('Post reported. Our team will review it.'),
-              backgroundColor: Colors.red,
-            ));
-          } catch (e) {
-            messenger.showSnackBar(SnackBar(
-              content: Text(e.toString().replaceFirst('Exception: ', '')),
-              backgroundColor: Colors.orange,
-            ));
-          }
-        }),
+      if (isOwn)
+        ListTile(leading: const Icon(Icons.delete_outline, color: Colors.red),
+          title: const Text('Delete post', style: TextStyle(color: Colors.red)),
+          onTap: () { Navigator.pop(context); _confirmDeletePost(); })
+      else
+        ListTile(leading: const Icon(Icons.flag_outlined, color: Colors.red), title: const Text('Report post'),
+          onTap: () async {
+            Navigator.pop(context);
+            final messenger = ScaffoldMessenger.of(context);
+            try {
+              await context.read<PostProvider>().reportPost(widget.post.id);
+              messenger.showSnackBar(const SnackBar(
+                content: Text('Post reported. Our team will review it.'),
+                backgroundColor: Colors.red,
+              ));
+            } catch (e) {
+              messenger.showSnackBar(SnackBar(
+                content: Text(e.toString().replaceFirst('Exception: ', '')),
+                backgroundColor: Colors.orange,
+              ));
+            }
+          }),
       ListTile(leading: const Icon(Icons.share_outlined), title: const Text('Share'), onTap: () => Navigator.pop(context)),
       ListTile(leading: const Icon(Icons.link), title: const Text('Copy link'), onTap: () => Navigator.pop(context)),
     ])));
+  }
+
+  Future<void> _confirmDeletePost() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete post?'),
+        content: const Text("This can't be undone."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red))),
+        ],
+      ));
+    if (confirmed != true || !mounted) return;
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<PostProvider>().deletePost(widget.post.id,
+        mediaUrls: widget.post.mediaUrls, thumbnailUrl: widget.post.thumbnailUrl);
+      navigator.pop();
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Could not delete post. Please try again.'),
+        backgroundColor: Colors.red,
+      ));
+    }
+  }
+
+  Future<void> _confirmDeleteComment(String commentId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete comment?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red))),
+        ],
+      ));
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<PostProvider>().deleteComment(widget.post.id, commentId);
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Could not delete comment. Please try again.'),
+        backgroundColor: Colors.red,
+      ));
+    }
   }
 }

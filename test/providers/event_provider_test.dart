@@ -147,4 +147,21 @@ void main() {
       expect(eventData['rsvpCount'], 0);
     });
   });
+
+  group('addEvent', () {
+    // Mirrors EventProvider.addEvent (M-5: now awaited so a rules rejection
+    // or offline failure propagates to the caller instead of being silently
+    // dropped after the UI already reported success).
+    Future<void> addEventMirror(Map<String, dynamic> data) async {
+      await db.collection('events').doc().set(data);
+    }
+
+    test('writes a new doc to the events collection', () async {
+      await addEventMirror({'title': 'Layover meetup', 'createdBy': 'biz-1'});
+
+      final snap = await db.collection('events').get();
+      expect(snap.docs, hasLength(1));
+      expect(snap.docs.first.data()['title'], 'Layover meetup');
+    });
+  });
 }

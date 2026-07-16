@@ -13,6 +13,14 @@ import '../helpers/fixtures.dart';
 
 class _MockAuthProvider extends Mock implements AuthProvider {}
 class _MockSafeCheckProvider extends Mock implements SafeCheckProvider {}
+// Read unconditionally in _loadNearbyUsers (matches real app wiring, where
+// UserProvider is always registered) — never invoked in these tests since
+// authProvider.isMock is stubbed true, skipping the updateMyLocation call site.
+class _MockUserProvider extends Mock implements UserProvider {}
+// NearbyUsersScreen's app bar renders TopBarActions, which reads the unread
+// counts from these two providers. Stubbed to 0 (empty badges) here.
+class _MockNotificationProvider extends Mock implements NotificationProvider {}
+class _MockChatProvider extends Mock implements ChatProvider {}
 
 /// NearbyUsersScreen calls FirebaseFirestore.instance directly in
 /// _loadNearbyUsers (not provider-mediated), and an unmocked .get() call
@@ -53,11 +61,20 @@ Future<GoRouter> _pumpScreen(
     ],
   );
 
+  final notificationProvider = _MockNotificationProvider();
+  final chatProvider = _MockChatProvider();
+  final userProvider = _MockUserProvider();
+  when(() => notificationProvider.unreadCount).thenReturn(0);
+  when(() => chatProvider.totalUnread).thenReturn(0);
+
   await tester.pumpWidget(
     MultiProvider(
       providers: [
         ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
         ChangeNotifierProvider<SafeCheckProvider>.value(value: safeCheckProvider),
+        ChangeNotifierProvider<NotificationProvider>.value(value: notificationProvider),
+        ChangeNotifierProvider<ChatProvider>.value(value: chatProvider),
+        ChangeNotifierProvider<UserProvider>.value(value: userProvider),
       ],
       child: MaterialApp.router(routerConfig: router),
     ),
@@ -76,6 +93,10 @@ void main() {
     authProvider = _MockAuthProvider();
     safeCheckProvider = _MockSafeCheckProvider();
     when(() => safeCheckProvider.latestForUser(any())).thenReturn(null);
+    // Mock mode short-circuits _loadNearbyUsers to a fixed mockMyLocation
+    // constant instead of calling the real geolocator plugin, which has no
+    // platform channel handler in this test environment (see H-4).
+    when(() => authProvider.isMock).thenReturn(true);
   });
 
   testWidgets('renders without crashing and shows the SafeCheck FAB',
@@ -86,7 +107,6 @@ void main() {
 
     expect(find.text('Nearby Users'), findsOneWidget);
     expect(find.widgetWithText(FloatingActionButton, 'SafeCheck'), findsOneWidget);
-    expect(find.textContaining('Locations are approximate'), findsOneWidget);
   });
 
   testWidgets('FAB reads "Update Status" once the user has an active check-in',
@@ -156,12 +176,16 @@ void main() {
     await tester.tap(find.widgetWithText(ElevatedButton, 'Share Status'));
     await _settle(tester);
 
+    // buildUser()'s default (empty) settings means approxLocationOnly is
+    // unset, which defaults ON — so the mock position (40.7128, -74.0060)
+    // is fuzzed to 2 decimals before being submitted (see
+    // resolveCoordinateToPersist / LocationService.fuzzCoordinate).
     verify(() => safeCheckProvider.checkIn(
           status: 'safe',
           message: null,
           city: 'Chicago',
-          lat: 40.7128,
-          lng: -74.0060,
+          lat: 40.71,
+          lng: -74.01,
           userId: 'me-uid',
           userName: 'Alex Pilot',
           userPhotoUrl: any(named: 'userPhotoUrl'),

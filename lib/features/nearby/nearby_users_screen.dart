@@ -7,10 +7,12 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../core/constants/app_routes.dart';
+import '../../core/services/location_service.dart';
 import '../../shared/widgets/shared_widgets.dart';
 import '../../shared/widgets/inline_error_banner.dart';
 import '../../shared/models/models.dart';
 import '../../shared/providers/real_providers.dart';
+import '../../shared/mock/mock_data.dart' show mockMyLocation;
 import '../../shared/utils/open_chat.dart';
 
 // ─── Status helpers ──────────────────────────────────────────
@@ -44,24 +46,35 @@ double _statusHue(String? status) => switch (status) {
   _           => BitmapDescriptor.hueYellow,
 };
 
+/// Joins airline/position, skipping blanks — both are empty when a user has
+/// "Show Airline & Position" turned off.
+String _airlinePositionLabel(_NearbyUser u) =>
+    [u.airline, u.position].where((s) => s.isNotEmpty).join(' · ');
+
 // ─── Nearby user model ───────────────────────────────────────
 class _NearbyUser {
   final String uid, name, airline, position, distance;
   final double lat, lng;
+  // Whether the viewer is allowed to see this user's SafeCheck status, per
+  // the user's own 'SafeCheck Visibility' setting (all/friends/verified).
+  final bool safeCheckVisible;
   const _NearbyUser({required this.uid, required this.name, required this.airline,
-    required this.position, required this.lat, required this.lng, required this.distance});
+    required this.position, required this.lat, required this.lng, required this.distance,
+    this.safeCheckVisible = true});
 }
 
-// Simulated coordinates around NYC for nearby users
-const _nearbyCoords = [
-  (40.7128, -74.0060, '0.3 km'),
-  (40.7158, -74.0020, '0.8 km'),
-  (40.7100, -74.0100, '1.2 km'),
-  (40.7180, -73.9980, '1.5 km'),
-  (40.7090, -74.0150, '2.0 km'),
-  (40.7140, -74.0080, '0.5 km'),
-  (40.7110, -74.0040, '1.0 km'),
-];
+/// Whether the viewer's own position should be persisted so others can see
+/// a real distance to them — gated on the 'shareLocation' setting, which
+/// defaults on (matches settings_screen.dart's `_shareLocation = true`).
+bool shouldShareLocation(Map<String, dynamic> settings) =>
+    settings['shareLocation'] != false;
+
+/// The coordinate to actually persist/submit: fuzzed to ~1.1km precision
+/// when 'Approximate Location Only' is on (also defaults on).
+(double, double) resolveCoordinateToPersist(double lat, double lng, Map<String, dynamic> settings) =>
+    settings['approxLocationOnly'] != false
+        ? LocationService.fuzzCoordinate(lat, lng)
+        : (lat, lng);
 
 // ─── Screen ──────────────────────────────────────────────────
 class NearbyUsersScreen extends StatefulWidget {
@@ -76,6 +89,11 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
   List<_NearbyUser> _nearbyUsers = [];
   bool _loadingUsers = true;
   String? _loadError;
+  // Non-null when location access itself is the blocker (permission denied,
+  // service disabled) — distinct from _loadError, which is a Firestore/GPS
+  // failure that's retryable without leaving the app.
+  LocationAccessResult? _locationStatus;
+  double? _myLat, _myLng;
 
   @override
   void initState() {
@@ -85,16 +103,52 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
 
   Future<void> _loadNearbyUsers() async {
     if (mounted) {
-      setState(() { _loadingUsers = true; _loadError = null; });
+      setState(() { _loadingUsers = true; _loadError = null; _locationStatus = null; });
     }
     final auth = context.read<AuthProvider>();
+    final userProvider = context.read<UserProvider>();
     final myUid = auth.currentUser?.uid;
+
+    if (auth.isMock) {
+      _myLat = mockMyLocation.$1;
+      _myLng = mockMyLocation.$2;
+    } else {
+      final access = await LocationService.instance.ensurePermission();
+      if (access != LocationAccessResult.granted) {
+        if (mounted) setState(() { _locationStatus = access; _loadingUsers = false; });
+        return;
+      }
+      final pos = await LocationService.instance.getCurrentPosition();
+      if (pos == null) {
+        if (mounted) {
+          setState(() {
+            _loadError = 'Could not get your location. Please try again.';
+            _loadingUsers = false;
+          });
+        }
+        return;
+      }
+      _myLat = pos.latitude;
+      _myLng = pos.longitude;
+
+      if (myUid != null) {
+        final settings = auth.currentUser?.settings ?? {};
+        if (shouldShareLocation(settings)) {
+          try {
+            final (lat, lng) = resolveCoordinateToPersist(_myLat!, _myLng!, settings);
+            await userProvider.updateMyLocation(myUid, lat, lng);
+          } catch (_) {/* fail open — nearby list still loads without sharing */}
+        }
+      }
+    }
 
     // Safety: do NOT show users I have blocked, AND do NOT show users
     // who have blocked me. Either direction means we shouldn't surface
     // each other on the map (stalking / harassment mitigation).
     final blockedByMe = <String>{};
     final blockedMe = <String>{};
+    final myFollowing = <String>{};
+    final iAmVerified = auth.currentUser?.isVerified ?? false;
     if (myUid != null) {
       try {
         final mineSnap = await FirebaseFirestore.instance
@@ -110,6 +164,12 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
         blockedMe.addAll(theirsSnap.docs.map((d) =>
             d.reference.parent.parent?.id ?? '').where((s) => s.isNotEmpty));
       } catch (_) {/* fail open */}
+      try {
+        final followingSnap = await FirebaseFirestore.instance
+            .collection('users').doc(myUid)
+            .collection('following').get();
+        myFollowing.addAll(followingSnap.docs.map((d) => d.id));
+      } catch (_) {/* fail open */}
     }
 
     try {
@@ -118,22 +178,38 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
           .limit(20) // fetch extra so blocks don't shrink the list to nothing
           .get();
       final users = <_NearbyUser>[];
-      int coordIdx = 0;
       for (final doc in snap.docs) {
         if (doc.id == myUid) continue;
         if (blockedByMe.contains(doc.id)) continue;
         if (blockedMe.contains(doc.id)) continue;
         if (users.length >= 10) break;
         final d = doc.data();
-        final coord = _nearbyCoords[coordIdx % _nearbyCoords.length];
+        final settings = d['settings'] as Map<String, dynamic>? ?? {};
+        // Respect "Show on Nearby Map" — the user opted out of appearing here.
+        if (settings['showOnNearby'] == false) continue;
+        // No stored position yet (never opened Nearby, or shareLocation is
+        // off) — nothing honest to show, so this user is skipped rather than
+        // given a fake distance.
+        final theirLat = (d['lat'] as num?)?.toDouble();
+        final theirLng = (d['lng'] as num?)?.toDouble();
+        if (theirLat == null || theirLng == null) continue;
+        final showAirline = settings['showAirline'] != false;
+        final visibility = settings['nearbyVisibility'] ?? 'all';
+        final safeCheckVisible = switch (visibility) {
+          'friends' => myFollowing.contains(doc.id),
+          'verified' => iAmVerified,
+          _ => true,
+        };
+        final meters = LocationService.distanceMeters(_myLat!, _myLng!, theirLat, theirLng);
         users.add(_NearbyUser(
           uid: doc.id,
           name: d['name'] ?? 'User',
-          airline: d['airline'] ?? '',
-          position: d['position'] ?? '',
-          lat: coord.$1, lng: coord.$2, distance: coord.$3,
+          airline: showAirline ? (d['airline'] ?? '') : '',
+          position: showAirline ? (d['position'] ?? '') : '',
+          lat: theirLat, lng: theirLng,
+          distance: '${(meters / 1000).toStringAsFixed(1)} km',
+          safeCheckVisible: safeCheckVisible,
         ));
-        coordIdx++;
       }
       if (mounted) setState(() { _nearbyUsers = users; _loadingUsers = false; });
     } catch (e) {
@@ -170,25 +246,9 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
           const TopBarActions(),
         ],
       ),
-      floatingActionButton: _buildFab(safeCheck),
+      floatingActionButton: _locationStatus == null ? _buildFab(safeCheck) : null,
       body: Column(children: [
-        // Honest notice: coordinates are approximate until real geolocation ships
-        Container(
-          width: double.infinity,
-          color: AppColors.warning.withValues(alpha: 0.08),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(children: [
-            const Icon(Icons.info_outline, size: 14, color: AppColors.warning),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                'Locations are approximate. Real GPS is coming in a future update.',
-                style: TextStyle(fontSize: 11, color: AppColors.warning.withValues(alpha: 0.9)),
-              ),
-            ),
-          ]),
-        ),
-        if (_loadError != null && _nearbyUsers.isEmpty)
+        if (_locationStatus == null && _loadError != null && _nearbyUsers.isEmpty)
           InlineErrorBanner(
             message: _loadError!,
             onRetry: _loadNearbyUsers,
@@ -196,15 +256,40 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
         Expanded(
           child: _loadingUsers
             ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-            : _loadError != null && _nearbyUsers.isEmpty
-              ? const SizedBox.shrink()
-              : _nearbyUsers.isEmpty
-                ? const Center(child: Text('No nearby users found', style: TextStyle(color: Colors.grey)))
-                : _listView ? _buildList(safeCheck) : _buildMap(safeCheck),
+            : _locationStatus != null
+              ? _buildLocationEmptyState(_locationStatus!)
+              : _loadError != null && _nearbyUsers.isEmpty
+                ? const SizedBox.shrink()
+                : _nearbyUsers.isEmpty
+                  ? const Center(child: Text('No nearby users found', style: TextStyle(color: Colors.grey)))
+                  : _listView ? _buildList(safeCheck) : _buildMap(safeCheck),
         ),
       ]),
     );
   }
+
+  // ─── Location permission/service empty states ─────────────
+  Widget _buildLocationEmptyState(LocationAccessResult status) => switch (status) {
+    LocationAccessResult.denied => EmptyState(
+        icon: Icons.location_off,
+        title: 'Location access needed',
+        subtitle: 'FlyConnect needs your location to show nearby crew and share SafeCheck status.',
+        actionLabel: 'Enable Location',
+        onAction: _loadNearbyUsers),
+    LocationAccessResult.deniedForever => EmptyState(
+        icon: Icons.location_off,
+        title: 'Location access needed',
+        subtitle: 'Location was denied. Enable it for FlyConnect in your device settings.',
+        actionLabel: 'Open Settings',
+        onAction: () => LocationService.instance.openAppSettings()),
+    LocationAccessResult.serviceDisabled => EmptyState(
+        icon: Icons.location_disabled,
+        title: 'Location services are off',
+        subtitle: 'Turn on Location Services in your device settings to use Nearby and SafeCheck.',
+        actionLabel: 'Open Settings',
+        onAction: () => LocationService.instance.openLocationSettings()),
+    LocationAccessResult.granted => const SizedBox.shrink(), // unreachable here
+  };
 
   // ─── FAB ──────────────────────────────────────────────────
   /// Emergency-number chip in the SafeCheck disclaimer.
@@ -259,7 +344,7 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
     // become status-coloured default markers. Tapping one still opens the
     // user card overlay, same as before.
     final markers = _nearbyUsers.map((u) {
-      final check = safeCheck.latestForUser(u.uid);
+      final check = u.safeCheckVisible ? safeCheck.latestForUser(u.uid) : null;
       return Marker(
         markerId: MarkerId(u.uid),
         position: LatLng(u.lat, u.lng),
@@ -268,32 +353,38 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
       );
     }).toSet();
 
+    final isMock = context.read<AuthProvider>().isMock;
+    final myLatLng = LatLng(_myLat!, _myLng!);
+
     return Stack(children: [
       GoogleMap(
-        initialCameraPosition: const CameraPosition(
-          target: LatLng(40.7128, -74.0060),
-          zoom: 14,
-        ),
+        initialCameraPosition: CameraPosition(target: myLatLng, zoom: 14),
         markers: markers,
+        // The native blue-dot layer only needs foreground location permission,
+        // already confirmed granted before this widget renders — skip it in
+        // mock mode so the Maps SDK never touches the real device GPS there.
+        myLocationEnabled: !isMock,
         myLocationButtonEnabled: false,
         zoomControlsEnabled: false,
         onMapCreated: (controller) => _mapController = controller,
         onTap: (_) => setState(() => _selected = null),
       ),
-      // My location button
+      // My location button — recenters on our own resolved position (mock or
+      // real) rather than the native button's OS-reported location, so mock
+      // mode and real mode behave identically here.
       Positioned(right: 16, bottom: _selected != null ? 260 : 100,
         child: FloatingActionButton.small(
           heroTag: 'my_location',
           backgroundColor: Colors.white,
           onPressed: () => _mapController?.animateCamera(
-            CameraUpdate.newLatLngZoom(const LatLng(40.7128, -74.0060), 14)),
+            CameraUpdate.newLatLngZoom(myLatLng, 14)),
           child: const Icon(Icons.my_location, color: AppColors.dark))),
       // Selected user card
       if (_selected != null) Positioned(
         bottom: 0, left: 0, right: 0,
         child: _UserCard(
           user: _selected!,
-          checkIn: safeCheck.latestForUser(_selected!.uid),
+          checkIn: _selected!.safeCheckVisible ? safeCheck.latestForUser(_selected!.uid) : null,
           onDismiss: () => setState(() => _selected = null))),
     ]);
   }
@@ -313,7 +404,7 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (context, i) {
           final u = _nearbyUsers[i];
-          final check = safeCheck.latestForUser(u.uid);
+          final check = u.safeCheckVisible ? safeCheck.latestForUser(u.uid) : null;
           return Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -325,7 +416,7 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
               const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(u.name, style: AppTextStyles.labelMedium),
-                Text('${u.airline} · ${u.position}', style: AppTextStyles.caption),
+                Text(_airlinePositionLabel(u), style: AppTextStyles.caption),
                 if (check != null) ...[
                   const SizedBox(height: 6),
                   _StatusBadge(status: check.status),
@@ -478,13 +569,17 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
                 if (user == null) return;
                 final status = selectedStatus!;
                 final message = msgCtrl.text.trim().isEmpty ? null : msgCtrl.text.trim();
+                // This sheet only opens once _loadNearbyUsers has resolved a
+                // real (or mock) position, so _myLat/_myLng are set; fuzz per
+                // the same 'Approximate Location Only' setting Nearby uses.
+                final (lat, lng) = resolveCoordinateToPersist(_myLat!, _myLng!, user.settings);
                 try {
                   await safeCheckProvider.checkIn(
                     status: status,
                     message: message,
                     city: user.city ?? 'New York',
-                    lat: 40.7128,
-                    lng: -74.0060,
+                    lat: lat,
+                    lng: lng,
                     userId: user.uid,
                     userName: user.name,
                     userPhotoUrl: user.photoUrl,
@@ -563,7 +658,7 @@ class _UserCard extends StatelessWidget {
           const SizedBox(width: 14),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(user.name, style: AppTextStyles.h4),
-            Text('${user.airline} · ${user.position}', style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary)),
+            Text(_airlinePositionLabel(user), style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary)),
             Row(children: [
               const Icon(Icons.location_on, size: 13, color: AppColors.primary),
               Text(user.distance, style: AppTextStyles.caption),

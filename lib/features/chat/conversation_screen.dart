@@ -25,7 +25,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
   @override
   void initState() {
     super.initState();
-    context.read<ChatProvider>().markAsRead(widget.chatId);
+    final chatProvider = context.read<ChatProvider>();
+    chatProvider.markAsRead(widget.chatId);
+    chatProvider.markMessagesRead(widget.chatId);
   }
 
   @override

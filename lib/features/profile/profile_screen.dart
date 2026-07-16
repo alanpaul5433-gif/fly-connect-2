@@ -171,8 +171,51 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       );
     }
 
-    final u = _user!;
     final isMe = widget.isOwner || widget.userId == null;
+    // Respect "Public Profile" — a private account is only visible to itself
+    // and accounts it has accepted a follow from.
+    if (!isMe && !_following && _user!.settings['profilePublic'] == false) {
+      return Scaffold(
+        appBar: AppBar(
+          leading: const BackButton(color: Colors.black),
+          backgroundColor: Colors.white,
+          elevation: 0,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(40),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.lock_outline,
+                      size: 28, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 16),
+                const Text('This profile is private',
+                    style: TextStyle(
+                        fontSize: 17, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                const Text(
+                  'Follow this account to see their posts and info.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: AppColors.textSecondary, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final u = _user!;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -247,7 +290,15 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                 _ActionIcon(icon: Icons.settings_outlined, onTap: () => context.push(AppRoutes.settings)),
                 const SizedBox(width: 10),
                 _PillBtn(label: 'Edit Profile', filled: true,
-                  onTap: () => context.push(AppRoutes.editProfileDetails)),
+                  // Opens the core profile editor (avatar / name / bio / airline).
+                  // The "looking for & interests" screen (editProfileDetails) is
+                  // still reachable via Settings → Edit Profile.
+                  // Reload on return so edits (e.g. a new avatar) show right away
+                  // instead of only after the next cold start.
+                  onTap: () async {
+                    await context.push(AppRoutes.editProfile);
+                    if (mounted) await _loadUser();
+                  }),
               ] else ...[
                 _ActionIcon(icon: Icons.chat_bubble_outline, onTap: _openChat),
                 const SizedBox(width: 10),
@@ -420,6 +471,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         if (isMe) ...[
           ListTile(leading: const Icon(Icons.share_outlined), title: const Text('Share profile'), onTap: () { Navigator.pop(context); _shareProfile(); }),
           ListTile(leading: const Icon(Icons.qr_code), title: const Text('My QR code'), onTap: () { Navigator.pop(context); _showMyQr(); }),
+          ListTile(leading: const Icon(Icons.bookmark_border), title: const Text('Saved posts'), onTap: () { Navigator.pop(context); context.push(AppRoutes.savedPosts); }),
           ListTile(leading: const Icon(Icons.lock_outline), title: const Text('Privacy settings'), onTap: () { Navigator.pop(context); context.push(AppRoutes.settings); }),
         ] else ...[
           ListTile(leading: const Icon(Icons.share_outlined), title: const Text('Share profile'), onTap: () { Navigator.pop(context); _shareProfile(); }),
@@ -632,7 +684,10 @@ class _LikedPostsGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<PostProvider>(
       builder: (context, provider, _) {
-        final posts = provider.feed;
+        // Only posts the user has liked — not the whole feed.
+        final posts = provider.feed
+            .where((p) => provider.likedPostIds.contains(p.id))
+            .toList();
         if (posts.isEmpty) {
           return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(Icons.favorite_border, size: 48, color: Colors.grey.shade300),
@@ -668,7 +723,8 @@ class _PostsGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<PostProvider>(
       builder: (context, provider, _) {
-        final posts = provider.feed;
+        // Only this profile's own posts — not the global feed.
+        final posts = provider.feed.where((p) => p.authorId == userId).toList();
         if (posts.isEmpty) {
           return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(Icons.grid_view_outlined, size: 48, color: Colors.grey.shade300),

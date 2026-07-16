@@ -79,6 +79,24 @@ UserModel _mockUserModelFor(String email, String role) {
   }
 }
 
+/// Fetches `users/{uid}` plus its owner-only `private/data` subdoc (email,
+/// phone, fcmToken) and merges them into one [UserModel] — only valid for the
+/// SIGNED-IN user's own uid, since `private/data` is owner-read-only. Fetching
+/// another user's uid here would just have the private read silently return
+/// nothing (not an error) and behave like a plain doc fetch.
+Future<UserModel?> _fetchSelfWithPrivate(FirebaseFirestore db, String uid) async {
+  final doc = await db.collection('users').doc(uid).get();
+  if (!doc.exists) return null;
+  final data = Map<String, dynamic>.from(doc.data()!);
+  final privateDoc =
+      await db.collection('users').doc(uid).collection('private').doc('data').get();
+  if (privateDoc.exists) data.addAll(privateDoc.data()!);
+  // Same Timestamp handling as UserModel.fromFirestore.
+  if (data['createdAt'] is Timestamp) data['createdAt'] = (data['createdAt'] as Timestamp).toDate();
+  if (data['lastSeen'] is Timestamp) data['lastSeen'] = (data['lastSeen'] as Timestamp).toDate();
+  return UserModel.fromMap(data, uid);
+}
+
 // ─── Real Auth Provider ──────────────────────────────────────
 class AuthProvider extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -129,9 +147,9 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _fetchUser(String uid) async {
-    final doc = await _db.collection('users').doc(uid).get();
-    if (doc.exists) {
-      _currentUser = UserModel.fromFirestore(doc);
+    final user = await _fetchSelfWithPrivate(_db, uid);
+    if (user != null) {
+      _currentUser = user;
     }
   }
 
@@ -217,17 +235,23 @@ class AuthProvider extends ChangeNotifier {
         createdAt: DateTime.now(),
         hobbies: [], passportStamps: [], travelHistory: [],
       );
-      // Persist user doc plus DOB / consent metadata for compliance
-      // (Apple 5.1.1, Play Families policy, GDPR Article 8 / COPPA).
-      // DOB is not on UserModel because most code shouldn't need it —
-      // we store it as an extra field for audit + future age verification.
-      final docData = user.toFirestore();
-      if (dob != null) {
-        docData['dob'] = Timestamp.fromDate(dob);
-        docData['ageVerifiedAt'] = FieldValue.serverTimestamp();
-      }
+      // email/phone/dob are PII and go to the owner-only `private/data`
+      // subdoc, not the main doc (any authed user can read `users/{uid}` —
+      // see firestore.rules and H-2 in docs/QA_AUDIT_REPORT.md). DOB is not
+      // on UserModel because most code shouldn't need it — it's stored as an
+      // extra field for audit + future age verification (Apple 5.1.1, Play
+      // Families policy, GDPR Article 8 / COPPA).
+      final docData = user.toFirestore()..remove('email')..remove('phone');
       docData['termsAcceptedAt'] = FieldValue.serverTimestamp();
       await _db.collection('users').doc(user.uid).set(docData);
+
+      final privateData = <String, dynamic>{'email': email, 'phone': phone};
+      if (dob != null) {
+        privateData['dob'] = Timestamp.fromDate(dob);
+        privateData['ageVerifiedAt'] = FieldValue.serverTimestamp();
+      }
+      await _db.collection('users').doc(user.uid)
+          .collection('private').doc('data').set(privateData);
       _currentUser = user;
       _loading = false; notifyListeners();
       return true;
@@ -281,6 +305,7 @@ class AuthProvider extends ChangeNotifier {
       await _deleteSubcollection(_db.collection('users').doc(uid).collection('following'));
       await _deleteSubcollection(_db.collection('users').doc(uid).collection('followers'));
       await _deleteSubcollection(_db.collection('users').doc(uid).collection('trips'));
+      await _deleteSubcollection(_db.collection('users').doc(uid).collection('private'));
 
       // 3. Soft-delete user's posts (anonymize author)
       final postSnap = await _db.collection('posts')
@@ -641,10 +666,27 @@ class UserProvider extends ChangeNotifier {
     if (isMock) { await Future.delayed(const Duration(milliseconds: 300)); notifyListeners(); return; }
     await _db.collection('users').doc(uid).update(data);
     if (_currentUser != null && uid == _currentUser!.uid) {
-      final doc = await _db.collection('users').doc(uid).get();
-      if (doc.exists) _currentUser = UserModel.fromFirestore(doc);
+      final user = await _fetchSelfWithPrivate(_db, uid);
+      if (user != null) _currentUser = user;
     }
     notifyListeners();
+  }
+
+  /// Upload a profile avatar and return its download URL (null in mock / when
+  /// signed out). Stored at `profile_photos/{uid}/avatar.png` — the two-segment
+  /// path matches the `profile_photos/{uid}/{file=**}` rule in storage.rules so
+  /// `isOwner(uid)` resolves to the real uid (a single-segment `{uid}.png` path
+  /// would capture the extension into {uid} and fail the owner check). Errors
+  /// propagate so the caller can surface them instead of silently dropping the
+  /// photo. Mirrors [PostProvider.uploadPostImage].
+  Future<String?> uploadProfilePhoto(Uint8List bytes) async {
+    if (isMock) return null;
+    final uid = _currentUser?.uid;
+    if (uid == null) return null;
+    final compressed = await compressForUpload(bytes, maxDimension: 1024);
+    final ref = FirebaseStorage.instance.ref('profile_photos/$uid/avatar.png');
+    await ref.putData(compressed, SettableMetadata(contentType: 'image/png'));
+    return await ref.getDownloadURL();
   }
 
   /// Match preferences live under users/{uid}.matchPrefs (a nested map) so they
@@ -657,6 +699,20 @@ class UserProvider extends ChangeNotifier {
 
   Future<void> saveMatchPrefs(String uid, Map<String, dynamic> prefs) =>
       updateProfile(uid, {'matchPrefs': prefs});
+
+  /// Notification + privacy toggles from the Settings screen, stored as a raw
+  /// map under `users/{uid}.settings` — same shape as [saveMatchPrefs].
+  Future<void> saveSettings(String uid, Map<String, dynamic> settings) =>
+      updateProfile(uid, {'settings': settings});
+
+  /// Persists the viewer's own current position so other users' Nearby
+  /// queries can compute a real distance to them. Callers are responsible
+  /// for the privacy gating (only call this when 'shareLocation' is on, and
+  /// pass an already-fuzzed coordinate when 'approxLocationOnly' is on) —
+  /// see nearby_users_screen.dart. This method is a pure "write these two
+  /// numbers" call, same shape as [saveSettings].
+  Future<void> updateMyLocation(String uid, double lat, double lng) =>
+      updateProfile(uid, {'lat': lat, 'lng': lng});
 
   Future<void> followUser(String targetUid) async {
     if (isMock) { _following.add(targetUid); notifyListeners(); return; }
@@ -709,6 +765,11 @@ class PostProvider extends ChangeNotifier {
 
   bool get loading => _loading;
   List<PostModel> get feed => _feed;
+
+  /// Post ids the signed-in user has liked (as tracked this session +
+  /// resolved via [isLiked]). Backs the profile "Liked" grid so it shows
+  /// only liked posts instead of the whole feed.
+  Set<String> get likedPostIds => _liked;
 
   /// Non-null when the feed stream has reported a failure. Cleared on
   /// every successful re-subscribe via [listenFeed].
@@ -838,6 +899,18 @@ class PostProvider extends ChangeNotifier {
     return doc.exists;
   }
 
+  /// Single-document fetch by id — used by the `/posts/:postId` deep link
+  /// (notification taps), which can't assume the post is already in [feed].
+  /// Returns null only when the post genuinely doesn't exist; a network/
+  /// transient failure is left to throw so the caller can offer a retry
+  /// instead of silently showing "not found" (see PostByIdScreen).
+  Future<PostModel?> getPost(String postId) async {
+    if (isMock) return _feed.where((p) => p.id == postId).firstOrNull;
+    final doc = await _db.collection('posts').doc(postId).get();
+    if (!doc.exists) return null;
+    return PostModel.fromFirestore(doc);
+  }
+
   // ── Saved / Bookmarked posts ────────────────────────────────
 
   Future<void> savePost(String postId) async {
@@ -863,6 +936,34 @@ class PostProvider extends ChangeNotifier {
     final doc = await _db.collection('users').doc(_uid).collection('savedPosts').doc(postId).get();
     if (doc.exists) _saved.add(postId);
     return doc.exists;
+  }
+
+  /// The signed-in user's saved posts, newest-saved first. `savedPosts` docs
+  /// only store `{savedAt}` (see [savePost]), so this re-fetches the actual
+  /// `posts` docs on every bookmark-list change rather than filtering
+  /// whatever happens to already be in [feed] — a saved post can easily have
+  /// scrolled out of the feed's loaded window.
+  Stream<List<PostModel>> watchSavedPosts() {
+    if (isMock) return Stream.value(const []);
+    if (_uid == null) return Stream.value(const []);
+    return _db.collection('users').doc(_uid).collection('savedPosts')
+        .orderBy('savedAt', descending: true)
+        .snapshots()
+        .asyncMap((snap) async {
+      final ids = snap.docs.map((d) => d.id).toList();
+      if (ids.isEmpty) return <PostModel>[];
+      final posts = <PostModel>[];
+      // Firestore caps whereIn at 30 values per query.
+      for (var i = 0; i < ids.length; i += 30) {
+        final chunk = ids.sublist(i, i + 30 > ids.length ? ids.length : i + 30);
+        final postsSnap = await _db.collection('posts')
+            .where(FieldPath.documentId, whereIn: chunk).get();
+        posts.addAll(postsSnap.docs.map((d) => PostModel.fromFirestore(d)));
+      }
+      // whereIn doesn't preserve order — resort to match savedAt order.
+      posts.sort((a, b) => ids.indexOf(a.id).compareTo(ids.indexOf(b.id)));
+      return posts;
+    });
   }
 
   Stream<List<CommentModel>> watchComments(String postId) {
@@ -894,6 +995,16 @@ class PostProvider extends ChangeNotifier {
     await _db.collection('posts').doc(postId).update({'commentCount': FieldValue.increment(1)});
   }
 
+  /// Delete a comment. Firestore rules only allow this for the comment's own
+  /// author (`isOwner(resource.data.authorId)`) or an admin — mirrors
+  /// [addComment]'s counter update in reverse.
+  Future<void> deleteComment(String postId, String commentId) async {
+    if (isMock) return;
+    if (_uid == null) return;
+    await _db.collection('posts').doc(postId).collection('comments').doc(commentId).delete();
+    await _db.collection('posts').doc(postId).update({'commentCount': FieldValue.increment(-1)});
+  }
+
   // Client-side defence against report-spamming. See
   // lib/shared/utils/report_rate_limiter.dart for the policy.
   final ReportRateLimiter _reportLimiter = ReportRateLimiter();
@@ -920,6 +1031,42 @@ class PostProvider extends ChangeNotifier {
       'reason': reason ?? 'Inappropriate content',
       'status': 'pending',      // pending | reviewed | actioned | dismissed
       'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Delete a post the signed-in user owns. Firestore rules enforce the
+  /// owner-or-admin check server-side (`isOwner(resource.data.authorId)`) —
+  /// this only needs to clean up what the rules don't cascade automatically:
+  /// the comments/likes subcollections and the uploaded media.
+  Future<void> deletePost(String postId,
+      {List<String> mediaUrls = const [], String? thumbnailUrl}) async {
+    if (isMock) return;
+    if (_uid == null) return;
+    final postRef = _db.collection('posts').doc(postId);
+
+    final batch = _db.batch();
+    final comments = await postRef.collection('comments').get();
+    for (final d in comments.docs) {
+      batch.delete(d.reference);
+    }
+    final likes = await postRef.collection('likes').get();
+    for (final d in likes.docs) {
+      batch.delete(d.reference);
+    }
+    batch.delete(postRef);
+    await batch.commit();
+
+    // Best-effort — a storage cleanup failure shouldn't block the post
+    // itself from being gone. Mirrors the swallow-and-continue style in
+    // [uploadPostImage]/[uploadPostVideo].
+    for (final url in [...mediaUrls, if (thumbnailUrl != null) thumbnailUrl]) {
+      try {
+        await FirebaseStorage.instance.refFromURL(url).delete();
+      } catch (_) {}
+    }
+
+    await _db.collection('users').doc(_uid).update({
+      'postCount': FieldValue.increment(-1),
     });
   }
 
@@ -966,6 +1113,32 @@ class PostProvider extends ChangeNotifier {
         .doc(targetUid)
         .delete();
     notifyListeners();
+  }
+
+  /// The signed-in user's blocked list, newest-blocked first. `blocked` docs
+  /// only store `{blockedAt}` (see [blockUser]), so this re-fetches the
+  /// actual `users` docs on every change — mirrors [watchSavedPosts].
+  Stream<List<UserModel>> watchBlockedUsers() {
+    if (isMock) return Stream.value(const []);
+    if (_uid == null) return Stream.value(const []);
+    return _db.collection('users').doc(_uid).collection('blocked')
+        .orderBy('blockedAt', descending: true)
+        .snapshots()
+        .asyncMap((snap) async {
+      final ids = snap.docs.map((d) => d.id).toList();
+      if (ids.isEmpty) return <UserModel>[];
+      final users = <UserModel>[];
+      // Firestore caps whereIn at 30 values per query.
+      for (var i = 0; i < ids.length; i += 30) {
+        final chunk = ids.sublist(i, i + 30 > ids.length ? ids.length : i + 30);
+        final usersSnap = await _db.collection('users')
+            .where(FieldPath.documentId, whereIn: chunk).get();
+        users.addAll(usersSnap.docs.map((d) => UserModel.fromFirestore(d)));
+      }
+      // whereIn doesn't preserve order — resort to match blockedAt order.
+      users.sort((a, b) => ids.indexOf(a.uid).compareTo(ids.indexOf(b.uid)));
+      return users;
+    });
   }
 
   // Upload image bytes to Firebase Storage and return the public download URL.
@@ -1076,6 +1249,11 @@ class ChatProvider extends ChangeNotifier {
 
   List<ChatModel> get chats => _chats;
 
+  /// Total unread messages for the signed-in user across every conversation.
+  /// Backs the top-bar chat badge; 0 when nothing is unread so the badge hides.
+  int get totalUnread =>
+      _chats.fold(0, (acc, c) => acc + (c.unreadCount[_uid] ?? 0));
+
   /// Non-null when the chat-list stream has reported a failure.
   /// Cleared on a successful snapshot or an explicit retry.
   String? get chatsError => _chatsError;
@@ -1142,7 +1320,11 @@ class ChatProvider extends ChangeNotifier {
     }
     if (_uid == null) return;
     final user = _auth.currentUser!;
-    final msgRef = _db.collection('chats').doc(chatId).collection('messages').doc();
+    final chatRef = _db.collection('chats').doc(chatId);
+    final msgRef = chatRef.collection('messages').doc();
+    final cachedChat = _chats.where((c) => c.id == chatId).firstOrNull;
+    final participants = cachedChat?.participants ??
+        List<String>.from((await chatRef.get()).data()?['participants'] ?? []);
     final batch = _db.batch();
     batch.set(msgRef, {
       'senderId': _uid, 'senderName': user.displayName ?? 'User',
@@ -1150,10 +1332,14 @@ class ChatProvider extends ChangeNotifier {
       'mediaUrl': mediaUrl, 'mediaType': mediaType,
       'readBy': [_uid], 'createdAt': FieldValue.serverTimestamp(),
     });
-    batch.update(_db.collection('chats').doc(chatId), {
+    final chatUpdate = <String, dynamic>{
       'lastMessage': text, 'lastMessageSenderId': _uid,
       'lastMessageAt': FieldValue.serverTimestamp(),
-    });
+    };
+    for (final uid in participants) {
+      if (uid != _uid) chatUpdate['unreadCount.$uid'] = FieldValue.increment(1);
+    }
+    batch.update(chatRef, chatUpdate);
     await batch.commit();
     notifyListeners();
   }
@@ -1162,6 +1348,26 @@ class ChatProvider extends ChangeNotifier {
     if (isMock) return;
     if (_uid == null) return;
     await _db.collection('chats').doc(chatId).update({'unreadCount.$_uid': 0});
+  }
+
+  /// Appends the current user to `readBy` on every message they haven't
+  /// seen yet, so the sender's bubble flips from a single check to a
+  /// double check (read receipt).
+  Future<void> markMessagesRead(String chatId) async {
+    if (isMock) return;
+    if (_uid == null) return;
+    final unseen = await _db.collection('chats').doc(chatId).collection('messages')
+        .where('senderId', isNotEqualTo: _uid).get();
+    final batch = _db.batch();
+    var hasWrites = false;
+    for (final doc in unseen.docs) {
+      final readBy = List<String>.from(doc.data()['readBy'] ?? []);
+      if (!readBy.contains(_uid)) {
+        batch.update(doc.reference, {'readBy': FieldValue.arrayUnion([_uid])});
+        hasWrites = true;
+      }
+    }
+    if (hasWrites) await batch.commit();
   }
 
   Future<String> getOrCreateDm(String otherUid) async {
@@ -1293,9 +1499,9 @@ class EventProvider extends ChangeNotifier {
 
   bool isRsvpd(String eventId) => _rsvpd.contains(eventId);
 
-  void addEvent(EventModel event) {
+  Future<void> addEvent(EventModel event) async {
     if (isMock) { _events.insert(0, event); notifyListeners(); return; }
-    _db.collection('events').doc().set(event.toFirestore());
+    await _db.collection('events').doc().set(event.toFirestore());
     notifyListeners();
   }
 
@@ -1388,10 +1594,15 @@ class GroupProvider extends ChangeNotifier {
 
   bool isMember(String groupId) => _joined.contains(groupId);
 
-  void createGroup(GroupModel group) {
+  Future<void> createGroup(GroupModel group) async {
     if (isMock) { _groups.insert(0, group); _joined.add(group.id); notifyListeners(); return; }
-    _db.collection('groups').doc().set(group.toFirestore());
-    if (group.id.isNotEmpty) _joined.add(group.id);
+    // Track the real Firestore-assigned doc id, not group.id (a disposable
+    // client-side placeholder never persisted — see toFirestore()/fromFirestore()) —
+    // otherwise _joined never matches the doc the snapshot listener loads back,
+    // and the creator's own new group silently never shows up under "My Groups".
+    final ref = _db.collection('groups').doc();
+    await ref.set(group.toFirestore());
+    _joined.add(ref.id);
     notifyListeners();
   }
 
@@ -1715,9 +1926,9 @@ class PromotionProvider extends ChangeNotifier {
     });
   }
 
-  void addPromotion(PromotionModel promo) {
+  Future<void> addPromotion(PromotionModel promo) async {
     if (isMock) { _promotions.insert(0, promo); notifyListeners(); return; }
-    _db.collection('promotions').doc().set(promo.toFirestore());
+    await _db.collection('promotions').doc().set(promo.toFirestore());
     notifyListeners();
   }
 

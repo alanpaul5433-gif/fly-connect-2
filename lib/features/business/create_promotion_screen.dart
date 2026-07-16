@@ -69,9 +69,16 @@ class _CreatePromotionScreenState extends State<CreatePromotionScreen> {
     }
     final auth = context.read<AuthProvider>();
     final user = auth.currentUser;
-    if (user == null || user.role != 'business') {
+    if (user == null || (user.role != 'business' && user.role != 'admin')) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Only business accounts can create deals.'),
+        backgroundColor: Colors.red));
+      return;
+    }
+    if (user.role == 'business' && !user.isVerified) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Your business account is pending verification. '
+            'You\'ll be able to create deals once an admin approves it.'),
         backgroundColor: Colors.red));
       return;
     }
@@ -104,7 +111,8 @@ class _CreatePromotionScreenState extends State<CreatePromotionScreen> {
         isApproved: false,
       );
       if (!mounted) return;
-      context.read<PromotionProvider>().addPromotion(newPromo);
+      await context.read<PromotionProvider>().addPromotion(newPromo);
+      if (!mounted) return;
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

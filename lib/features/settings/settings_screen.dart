@@ -11,6 +11,9 @@ import '../../core/constants/app_routes.dart';
 import '../../core/constants/legal_urls.dart';
 import '../../shared/widgets/confirm_dialog.dart';
 import '../../shared/providers/auth_provider.dart';
+import '../../shared/providers/user_provider.dart';
+import '../../shared/providers/post_provider.dart';
+import '../../shared/models/models.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -37,6 +40,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _loadVersion();
+    _loadSettings();
   }
 
   Future<void> _loadVersion() async {
@@ -47,6 +51,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
       // Fall back to pubspec version if platform call fails
       if (mounted) setState(() => _appVersion = '—');
     }
+  }
+
+  /// Seeds every toggle from `users/{uid}.settings`. Missing keys (e.g. a
+  /// pre-migration account with no `settings` map yet) keep today's hardcoded
+  /// defaults rather than surprising the user with everything flipping.
+  void _loadSettings() {
+    final settings = context.read<UserProvider>().currentUser?.settings ?? {};
+    setState(() {
+      _pushLikes = settings['pushLikes'] ?? _pushLikes;
+      _pushComments = settings['pushComments'] ?? _pushComments;
+      _pushMatches = settings['pushMatches'] ?? _pushMatches;
+      _pushMessages = settings['pushMessages'] ?? _pushMessages;
+      _pushEvents = settings['pushEvents'] ?? _pushEvents;
+      _profilePublic = settings['profilePublic'] ?? _profilePublic;
+      _showOnNearby = settings['showOnNearby'] ?? _showOnNearby;
+      _showAirline = settings['showAirline'] ?? _showAirline;
+      _shareLocation = settings['shareLocation'] ?? _shareLocation;
+      _approxLocationOnly = settings['approxLocationOnly'] ?? _approxLocationOnly;
+      _nearbyVisibility = settings['nearbyVisibility'] ?? _nearbyVisibility;
+      _pushSafeCheck = settings['pushSafeCheck'] ?? _pushSafeCheck;
+    });
+  }
+
+  Map<String, dynamic> _settingsMap() => {
+    'pushLikes': _pushLikes,
+    'pushComments': _pushComments,
+    'pushMatches': _pushMatches,
+    'pushMessages': _pushMessages,
+    'pushEvents': _pushEvents,
+    'profilePublic': _profilePublic,
+    'showOnNearby': _showOnNearby,
+    'showAirline': _showAirline,
+    'shareLocation': _shareLocation,
+    'approxLocationOnly': _approxLocationOnly,
+    'nearbyVisibility': _nearbyVisibility,
+    'pushSafeCheck': _pushSafeCheck,
+  };
+
+  /// Applies a local field change immediately (snappy toggle feel), then
+  /// persists the whole settings map. A failed write surfaces a snackbar
+  /// instead of silently reverting on next load.
+  void _updateSetting(VoidCallback apply) {
+    setState(apply);
+    final uid = context.read<AuthProvider>().currentUser?.uid;
+    if (uid == null) return;
+    context.read<UserProvider>().saveSettings(uid, _settingsMap()).catchError((_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Could not save setting. Please try again.'),
+          backgroundColor: Colors.red));
+      }
+    });
   }
 
   @override
@@ -72,29 +128,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ]),
         _Section(title: 'Notifications', children: [
           _ToggleTile(icon: Icons.favorite_outline, label: 'Likes', value: _pushLikes,
-            onChanged: (v) => setState(() => _pushLikes = v)),
+            onChanged: (v) => _updateSetting(() => _pushLikes = v)),
           _ToggleTile(icon: Icons.chat_bubble_outline, label: 'Comments', value: _pushComments,
-            onChanged: (v) => setState(() => _pushComments = v)),
+            onChanged: (v) => _updateSetting(() => _pushComments = v)),
           _ToggleTile(icon: Icons.favorite_border, label: 'New Matches', value: _pushMatches,
-            onChanged: (v) => setState(() => _pushMatches = v)),
+            onChanged: (v) => _updateSetting(() => _pushMatches = v)),
           _ToggleTile(icon: Icons.message_outlined, label: 'Messages', value: _pushMessages,
-            onChanged: (v) => setState(() => _pushMessages = v)),
+            onChanged: (v) => _updateSetting(() => _pushMessages = v)),
           _ToggleTile(icon: Icons.event_outlined, label: 'Events Near You', value: _pushEvents,
-            onChanged: (v) => setState(() => _pushEvents = v)),
+            onChanged: (v) => _updateSetting(() => _pushEvents = v)),
           _ToggleTile(icon: Icons.health_and_safety, label: 'SafeCheck Alerts', value: _pushSafeCheck,
-            onChanged: (v) => setState(() => _pushSafeCheck = v)),
+            onChanged: (v) => _updateSetting(() => _pushSafeCheck = v)),
         ]),
         _Section(title: 'Privacy', children: [
           _ToggleTile(icon: Icons.public, label: 'Public Profile', value: _profilePublic,
-            onChanged: (v) => setState(() => _profilePublic = v)),
+            onChanged: (v) => _updateSetting(() => _profilePublic = v)),
           _ToggleTile(icon: Icons.location_on_outlined, label: 'Show on Nearby Map', value: _showOnNearby,
-            onChanged: (v) => setState(() => _showOnNearby = v)),
+            onChanged: (v) => _updateSetting(() => _showOnNearby = v)),
           _ToggleTile(icon: Icons.flight, label: 'Show Airline & Position', value: _showAirline,
-            onChanged: (v) => setState(() => _showAirline = v)),
+            onChanged: (v) => _updateSetting(() => _showAirline = v)),
           _ToggleTile(icon: Icons.share_location, label: 'Share Location for SafeCheck', value: _shareLocation,
-            onChanged: (v) => setState(() => _shareLocation = v)),
+            onChanged: (v) => _updateSetting(() => _shareLocation = v)),
           _ToggleTile(icon: Icons.blur_on, label: 'Approximate Location Only', value: _approxLocationOnly,
-            onChanged: (v) => setState(() => _approxLocationOnly = v)),
+            onChanged: (v) => _updateSetting(() => _approxLocationOnly = v)),
           _Tile(icon: Icons.visibility, label: 'SafeCheck Visibility',
             trailing: Text(
               _nearbyVisibility == 'all' ? 'Everyone'
@@ -174,7 +230,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           RadioGroup<String>(
             groupValue: _nearbyVisibility,
             onChanged: (val) {
-              setState(() => _nearbyVisibility = val!);
+              _updateSetting(() => _nearbyVisibility = val!);
               Navigator.pop(context);
             },
             child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -277,16 +333,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _blockedUsersSheet(BuildContext context) {
+    final post = context.read<PostProvider>();
     showModalBottomSheet(context: context, isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (_) => DraggableScrollableSheet(initialChildSize: 0.6, maxChildSize: 0.9, minChildSize: 0.3,
+      builder: (sheetCtx) => DraggableScrollableSheet(initialChildSize: 0.6, maxChildSize: 0.9, minChildSize: 0.3,
         expand: false,
         builder: (_, ctrl) => Column(children: [
           const Padding(padding: EdgeInsets.all(16),
             child: Text('Blocked Users', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold))),
-          Expanded(child: ListView(controller: ctrl,
-            children: const [Center(child: Padding(padding: EdgeInsets.all(32),
-              child: Text('No blocked users', style: TextStyle(color: Colors.grey))))])),
+          Expanded(child: StreamBuilder<List<UserModel>>(
+            stream: post.watchBlockedUsers(),
+            builder: (context, snap) {
+              if (!snap.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final blocked = snap.data!;
+              if (blocked.isEmpty) {
+                return ListView(controller: ctrl,
+                  children: const [Center(child: Padding(padding: EdgeInsets.all(32),
+                    child: Text('No blocked users', style: TextStyle(color: Colors.grey))))]);
+              }
+              return ListView.builder(controller: ctrl,
+                itemCount: blocked.length,
+                itemBuilder: (context, i) {
+                  final u = blocked[i];
+                  return ListTile(
+                    leading: CircleAvatar(backgroundColor: AppColors.dark,
+                      backgroundImage: u.photoUrl != null ? NetworkImage(u.photoUrl!) : null,
+                      child: u.photoUrl == null
+                          ? Text(u.name.isNotEmpty ? u.name[0] : '?',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                          : null),
+                    title: Text(u.name),
+                    trailing: OutlinedButton(
+                      onPressed: () async {
+                        final ok = await showConfirmDialog(sheetCtx,
+                          title: 'Unblock ${u.name}?',
+                          message: 'They will be able to see your profile and interact with you again.',
+                          confirmLabel: 'Unblock');
+                        if (ok) await post.unblockUser(u.uid);
+                      },
+                      child: const Text('Unblock'),
+                    ),
+                  );
+                },
+              );
+            },
+          )),
         ])));
   }
 
