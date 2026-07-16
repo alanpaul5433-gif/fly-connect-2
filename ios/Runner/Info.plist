@@ -76,8 +76,6 @@
 		<string>FlyConnect uses your location to show you nearby crew members and to attach your location to SafeCheck check-ins when you choose to share it.</string>
 		<key>NSPhotoLibraryUsageDescription</key>
 		<string>FlyConnect needs access to your photo library so you can choose photos for posts, profile pictures, and stories.</string>
-		<key>NSUserTrackingUsageDescription</key>
-		<string>FlyConnect uses anonymous analytics to improve the app. We do not share your activity with other companies or apps.</string>
 		<key>UIApplicationSceneManifest</key>
 		<dict>
 			<key>UIApplicationSupportsMultipleScenes</key>

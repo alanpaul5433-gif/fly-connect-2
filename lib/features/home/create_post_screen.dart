@@ -113,7 +113,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   Future<void> _post() async {
     final hasMedia = _imageBytes != null || _videoFile != null;
-    if (_captionController.text.trim().isEmpty && !hasMedia) return;
+    if (_captionController.text.trim().isEmpty && !hasMedia) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Add a caption or a photo/video before sharing.'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
     setState(() => _loading = true);
 
     final provider = context.read<PostProvider>();
