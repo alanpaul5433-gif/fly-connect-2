@@ -27,7 +27,10 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       CurvedAnimation(parent: _controller, curve: const Interval(0.0, 0.5)));
     _controller.forward();
 
-    Future.delayed(const Duration(seconds: 2), _routeNext);
+    // Route once the 900ms logo animation has fully played (plus a ~100ms
+    // beat). Was a flat 2s — trimmed to cut ~1s of dead splash time off
+    // perceived cold start without clipping the animation (L-7).
+    Future.delayed(const Duration(milliseconds: 1000), _routeNext);
   }
 
   Future<void> _routeNext() async {
