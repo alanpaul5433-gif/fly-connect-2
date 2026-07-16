@@ -8,6 +8,7 @@ import '../../shared/providers/auth_provider.dart';
 import '../../shared/models/models.dart';
 import '../../shared/widgets/cached_image.dart';
 import '../../shared/widgets/feed_video.dart';
+import 'edit_post_screen.dart';
 
 class PostDetailsScreen extends StatefulWidget {
   final PostModel post;
@@ -20,6 +21,7 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
   bool _isLiked = false;
   bool _isSaved = false;
   int _likeCount = 0;
+  late PostModel _post;
 
   void _sharePost() {
     final link = 'https://flyconnect.co/posts/${widget.post.id}';
@@ -48,6 +50,7 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
   @override
   void initState() {
     super.initState();
+    _post = widget.post;
     _likeCount = widget.post.likeCount;
     _checkLike();
     _checkSaved();
@@ -107,7 +110,9 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
                 fallback: Text(widget.post.authorName.isNotEmpty ? widget.post.authorName[0] : '?', style: const TextStyle(color: Colors.white)),
               ),
               title: Text(widget.post.authorName, style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(timeago.format(widget.post.createdAt)),
+              subtitle: Text(
+                '${timeago.format(_post.createdAt)}${_post.editedAt != null ? ' · edited' : ''}',
+              ),
             ),
             if (widget.post.mediaType == 'video' && widget.post.mediaUrls.isNotEmpty)
               FeedVideo(
@@ -158,7 +163,7 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
               const SizedBox(height: 8),
               RichText(text: TextSpan(style: const TextStyle(color: Colors.black, fontSize: 14), children: [
                 TextSpan(text: '${widget.post.authorName} ', style: const TextStyle(fontWeight: FontWeight.bold)),
-                TextSpan(text: widget.post.caption),
+                TextSpan(text: _post.caption),
               ])),
             ])),
             const Divider(),
@@ -226,14 +231,24 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
   bool get _isOwnPost =>
       context.read<AuthProvider>().currentUser?.uid == widget.post.authorId;
 
+  Future<void> _editPost() async {
+    Navigator.pop(context); // close the options sheet
+    final updated = await Navigator.push<PostModel>(context,
+      MaterialPageRoute(builder: (_) => EditPostScreen(post: _post)));
+    if (updated != null && mounted) setState(() => _post = updated);
+  }
+
   void _showOptions(BuildContext context) {
     final isOwn = _isOwnPost;
     showModalBottomSheet(context: context, builder: (_) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      if (isOwn)
+      if (isOwn) ...[
+        ListTile(leading: const Icon(Icons.edit_outlined),
+          title: const Text('Edit post'),
+          onTap: _editPost),
         ListTile(leading: const Icon(Icons.delete_outline, color: Colors.red),
           title: const Text('Delete post', style: TextStyle(color: Colors.red)),
-          onTap: () { Navigator.pop(context); _confirmDeletePost(); })
-      else
+          onTap: () { Navigator.pop(context); _confirmDeletePost(); }),
+      ] else
         ListTile(leading: const Icon(Icons.flag_outlined, color: Colors.red), title: const Text('Report post'),
           onTap: () async {
             Navigator.pop(context);
