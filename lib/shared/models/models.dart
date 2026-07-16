@@ -133,6 +133,7 @@ class PostModel {
   final int reportCount;
   final String? groupId;
   final DateTime createdAt;
+  final DateTime? editedAt; // set on first edit (M-7); null if never edited
 
   const PostModel({
     required this.id, required this.authorId, required this.authorName,
@@ -140,12 +141,13 @@ class PostModel {
     this.thumbnailUrl, this.aspectRatio, this.durationMs,
     this.caption = '', this.location, this.likeCount = 0,
     this.commentCount = 0, this.isReported = false, this.reportCount = 0,
-    this.groupId, required this.createdAt,
+    this.groupId, required this.createdAt, this.editedAt,
   });
 
   factory PostModel.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
     if (d['createdAt'] is Timestamp) d['createdAt'] = (d['createdAt'] as Timestamp).toDate();
+    if (d['editedAt'] is Timestamp) d['editedAt'] = (d['editedAt'] as Timestamp).toDate();
     return PostModel(
       id: doc.id,
       authorId: d['authorId'] ?? '',
@@ -164,6 +166,7 @@ class PostModel {
       reportCount: d['reportCount'] ?? 0,
       groupId: d['groupId'],
       createdAt: d['createdAt'] is DateTime ? d['createdAt'] : DateTime.now(),
+      editedAt: d['editedAt'] is DateTime ? d['editedAt'] as DateTime : null,
     );
   }
 
@@ -174,7 +177,7 @@ class PostModel {
     'caption': caption,
     'location': location, 'likeCount': likeCount, 'commentCount': commentCount,
     'isReported': isReported, 'reportCount': reportCount, 'groupId': groupId,
-    'createdAt': createdAt,
+    'createdAt': createdAt, 'editedAt': editedAt,
   };
 }
 
