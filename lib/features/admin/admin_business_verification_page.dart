@@ -112,6 +112,73 @@ class _AdminBusinessVerificationPageState
     _fetchBusinesses();
   }
 
+  /// Asks what's missing, sets an intermediate status, and notifies the
+  /// applicant — mirrors admin_notifications_page.dart's notification-write
+  /// shape (there's no shared "send notification" provider method yet) so
+  /// NotificationProvider picks it up the same way any other push would
+  /// (M-7 — this button was previously a no-op).
+  Future<void> _requestMoreInfo(String id, String name) async {
+    final ctrl = TextEditingController();
+    final message = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('Request More Info',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 3,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'e.g. Please upload a clearer photo of your business license.',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.warning,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+    if (message == null || message.isEmpty) return;
+
+    await FirebaseFirestore.instance.collection('users').doc(id).update({
+      'verificationStatus': 'info_requested',
+    });
+    await FirebaseFirestore.instance.collection('notifications').add({
+      'uid': id,
+      'userId': id,
+      'title': 'Verification: more info needed',
+      'body': message,
+      'type': 'admin',
+      'isRead': false,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    await logAdminAction(
+      action: 'request_business_info',
+      targetType: 'business',
+      targetId: id,
+      details: 'Requested more info from "$name": $message',
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Request sent.')));
+    }
+    _fetchBusinesses();
+  }
+
   Future<bool> _showConfirm(
     BuildContext context, {
     required String title,
@@ -435,7 +502,7 @@ class _AdminBusinessVerificationPageState
                           width: 140,
                           height: 32,
                           child: OutlinedButton(
-                            onPressed: () {},
+                            onPressed: () => _requestMoreInfo(id, name),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: AppColors.warning,
                               side: const BorderSide(color: AppColors.warning),

@@ -1391,6 +1391,19 @@ class ChatProvider extends ChangeNotifier {
     await _db.collection('chats').doc(chatId).update({'unreadCount.$_uid': 0});
   }
 
+  /// Toggles whether the signed-in user has muted this conversation (M-7).
+  /// Muted state is per-user (`mutedBy` array on the chat doc) so it doesn't
+  /// affect other participants' notifications.
+  Future<void> toggleMute(String chatId) async {
+    if (isMock) return;
+    if (_uid == null) return;
+    final chat = _chats.where((c) => c.id == chatId).firstOrNull;
+    final isMuted = chat?.mutedBy.contains(_uid) ?? false;
+    await _db.collection('chats').doc(chatId).update({
+      'mutedBy': isMuted ? FieldValue.arrayRemove([_uid]) : FieldValue.arrayUnion([_uid]),
+    });
+  }
+
   /// Appends the current user to `readBy` on every message they haven't
   /// seen yet, so the sender's bubble flips from a single check to a
   /// double check (read receipt).
@@ -1540,18 +1553,37 @@ class EventProvider extends ChangeNotifier {
 
   bool isRsvpd(String eventId) => _rsvpd.contains(eventId);
 
+  // Upload an event cover image to Firebase Storage and return the public
+  // download URL. Mirrors [PostProvider.uploadPostImage].
+  // Path: user_uploads/{uid}/events/{timestamp}.png
+  Future<String?> uploadEventImage(Uint8List bytes) async {
+    if (isMock) return null;
+    if (_uid == null) return null;
+    try {
+      final compressed = await compressForUpload(bytes);
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final ref = FirebaseStorage.instance.ref('user_uploads/$_uid/events/$ts.png');
+      await ref.putData(compressed, SettableMetadata(contentType: 'image/png'));
+      return await ref.getDownloadURL();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> addEvent(EventModel event) async {
     if (isMock) { _events.insert(0, event); notifyListeners(); return; }
     await _db.collection('events').doc().set(event.toFirestore());
     notifyListeners();
   }
 
-  Future<void> updateEvent(String eventId, {String? title, String? description, String? location}) async {
+  Future<void> updateEvent(String eventId,
+      {String? title, String? description, String? location, String? imageUrl}) async {
     if (isMock) { notifyListeners(); return; }
     final updates = <String, dynamic>{};
     if (title != null) updates['title'] = title;
     if (description != null) updates['description'] = description;
     if (location != null) updates['location'] = location;
+    if (imageUrl != null) updates['imageUrl'] = imageUrl;
     if (updates.isEmpty) return;
     await _db.collection('events').doc(eventId).update(updates);
   }
@@ -1806,6 +1838,15 @@ class MatchProvider extends ChangeNotifier {
   }
 }
 
+/// Distinguishes "you're offline" from a real backend failure so
+/// NotificationProvider doesn't show the same dead-end copy for both (M-8).
+String describeNotificationsError(Object err) {
+  if (err is FirebaseException && err.code == 'unavailable') {
+    return 'You\'re offline. Check your connection and try again.';
+  }
+  return 'Something went wrong loading notifications. Please try again.';
+}
+
 // ─── Real Notification Provider ──────────────────────────────
 class NotificationProvider extends ChangeNotifier {
   final bool isMock;
@@ -1849,7 +1890,7 @@ class NotificationProvider extends ChangeNotifier {
       if (_notificationsError != null) _notificationsError = null;
       notifyListeners();
     }, onError: (Object err) {
-      _notificationsError = 'Could not load notifications.';
+      _notificationsError = describeNotificationsError(err);
       notifyListeners();
     });
   }

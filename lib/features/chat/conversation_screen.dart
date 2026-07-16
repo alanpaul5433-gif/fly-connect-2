@@ -12,8 +12,9 @@ class ConversationScreen extends StatefulWidget {
   final String chatId;
   final String otherName;
   final String? otherPhotoUrl;
+  final String? otherUid;
   final bool isGroup;
-  const ConversationScreen({super.key, required this.chatId, required this.otherName, this.otherPhotoUrl, this.isGroup = false});
+  const ConversationScreen({super.key, required this.chatId, required this.otherName, this.otherPhotoUrl, this.otherUid, this.isGroup = false});
   @override State<ConversationScreen> createState() => _ConversationScreenState();
 }
 
@@ -65,39 +66,49 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   void _showConversationMenu() {
+    final chatProvider = context.read<ChatProvider>();
+    final myUid = context.read<AuthProvider>().currentUser?.uid ?? '';
+    final chat = chatProvider.chats.where((c) => c.id == widget.chatId).firstOrNull;
+    final isMuted = chat?.mutedBy.contains(myUid) ?? false;
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          // Mute / Clear-conversation hidden for v1.0 — not yet implemented.
-          // Report + Block below are fully functional (write to Firestore).
+          ListTile(
+            leading: Icon(isMuted ? Icons.notifications_active_outlined : Icons.notifications_off_outlined),
+            title: Text(isMuted ? 'Unmute conversation' : 'Mute conversation'),
+            onTap: () async {
+              Navigator.pop(context);
+              await chatProvider.toggleMute(widget.chatId);
+            },
+          ),
           ListTile(
             leading: const Icon(Icons.flag_outlined, color: Colors.red),
-            title:
-                const Text('Report user', style: TextStyle(color: Colors.red)),
+            title: Text(widget.isGroup ? 'Report conversation' : 'Report user',
+                style: const TextStyle(color: Colors.red)),
             onTap: () {
               Navigator.pop(context);
               _showReportSheet();
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.block, color: Colors.red),
-            title: const Text('Block user', style: TextStyle(color: Colors.red)),
-            onTap: () async {
-              Navigator.pop(context);
-              await context
-                  .read<PostProvider>()
-                  .blockUser(widget.chatId); // chatId == other user's uid for DMs
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('User blocked. You will not see their content.'),
-                  duration: Duration(seconds: 2),
-                ));
-              }
-            },
-          ),
+          if (!widget.isGroup)
+            ListTile(
+              leading: const Icon(Icons.block, color: Colors.red),
+              title: const Text('Block user', style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                Navigator.pop(context);
+                final targetUid = widget.otherUid ?? widget.chatId;
+                await context.read<PostProvider>().blockUser(targetUid);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('User blocked. You will not see their content.'),
+                    duration: Duration(seconds: 2),
+                  ));
+                }
+              },
+            ),
         ]),
       ),
     );
@@ -132,7 +143,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   Navigator.pop(context);
                   await context.read<PostProvider>().reportContent(
                         targetType: widget.isGroup ? 'chat' : 'user',
-                        targetId: widget.chatId,
+                        targetId: widget.isGroup ? widget.chatId : (widget.otherUid ?? widget.chatId),
                         reason: r,
                       );
                   if (mounted) {

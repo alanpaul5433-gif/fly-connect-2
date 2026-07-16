@@ -11,10 +11,10 @@ import { onChatMessageCreated } from '../messages';
 
 const test = functionsTest();
 
-function mockChat(participants: string[]) {
+function mockChat(participants: string[], mutedBy: string[] = []) {
   (db.collection as jest.Mock).mockImplementation((name: string) => {
     if (name !== 'chats') throw new Error(`unexpected collection ${name}`);
-    return { doc: () => ({ get: async () => ({ exists: true, data: () => ({ participants }) }) }) };
+    return { doc: () => ({ get: async () => ({ exists: true, data: () => ({ participants, mutedBy }) }) }) };
   });
 }
 
@@ -77,6 +77,32 @@ describe('onChatMessageCreated', () => {
 
     // 50 participants total in the cap, minus the sender who is among them.
     expect(createNotificationIdempotent).toHaveBeenCalledTimes(49);
+  });
+
+  it('does not notify a recipient who has muted the conversation (M-7)', async () => {
+    mockChat(['sender-1', 'recipient-1', 'recipient-2'], ['recipient-1']);
+
+    await wrapped({
+      params: { chatId: 'chat-1', messageId: 'msg-1' },
+      data: { senderId: 'sender-1' },
+    });
+
+    expect(createNotificationIdempotent).toHaveBeenCalledTimes(1);
+    expect(createNotificationIdempotent).toHaveBeenCalledWith(
+      'message_msg-1_recipient-2',
+      expect.objectContaining({ userId: 'recipient-2' }),
+    );
+  });
+
+  it('skips entirely if every other participant has muted the conversation', async () => {
+    mockChat(['sender-1', 'recipient-1'], ['recipient-1']);
+
+    await wrapped({
+      params: { chatId: 'chat-1', messageId: 'msg-1' },
+      data: { senderId: 'sender-1' },
+    });
+
+    expect(createNotificationIdempotent).not.toHaveBeenCalled();
   });
 
   it('skips entirely if the chat no longer exists', async () => {

@@ -25,6 +25,7 @@ export const onChatMessageCreated = onDocumentCreated(
     const chat = await db.collection('chats').doc(chatId).get();
     if (!chat.exists) return;
     const participants = (chat.data()?.participants as string[] | undefined) ?? [];
+    const mutedBy = (chat.data()?.mutedBy as string[] | undefined) ?? [];
 
     let capped = participants;
     if (participants.length > MAX_PARTICIPANTS) {
@@ -32,7 +33,9 @@ export const onChatMessageCreated = onDocumentCreated(
       capped = participants.slice(0, MAX_PARTICIPANTS);
     }
 
-    const recipients = capped.filter((uid) => uid !== senderId);
+    // M-7: a participant who muted this conversation still receives the
+    // message (in-app), just no push/notification-list entry for it.
+    const recipients = capped.filter((uid) => uid !== senderId && !mutedBy.includes(uid));
     if (recipients.length === 0) return;
 
     const name = await actorName(senderId);

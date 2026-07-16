@@ -229,13 +229,14 @@ class ChatModel {
   final DateTime? lastMessageAt;
   final String createdBy;
   final Map<String, int> unreadCount;
+  final List<String> mutedBy;
   final DateTime createdAt;
 
   const ChatModel({
     required this.id, required this.type, required this.participants,
     this.groupName, this.groupPhotoUrl, this.lastMessage,
     this.lastMessageSenderId, this.lastMessageAt, required this.createdBy,
-    this.unreadCount = const {}, required this.createdAt,
+    this.unreadCount = const {}, this.mutedBy = const [], required this.createdAt,
   });
 
   factory ChatModel.fromFirestore(DocumentSnapshot doc) {
@@ -253,6 +254,7 @@ class ChatModel {
       lastMessageAt: d['lastMessageAt'] is DateTime ? d['lastMessageAt'] : null,
       createdBy: d['createdBy'] ?? '',
       unreadCount: Map<String, int>.from(d['unreadCount'] ?? {}),
+      mutedBy: List<String>.from(d['mutedBy'] ?? []),
       createdAt: d['createdAt'] is DateTime ? d['createdAt'] : DateTime.now(),
     );
   }
@@ -261,7 +263,8 @@ class ChatModel {
     'type': type, 'participants': participants, 'groupName': groupName,
     'groupPhotoUrl': groupPhotoUrl, 'lastMessage': lastMessage,
     'lastMessageSenderId': lastMessageSenderId, 'lastMessageAt': lastMessageAt,
-    'createdBy': createdBy, 'unreadCount': unreadCount, 'createdAt': createdAt,
+    'createdBy': createdBy, 'unreadCount': unreadCount, 'mutedBy': mutedBy,
+    'createdAt': createdAt,
   };
 }
 

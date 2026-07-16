@@ -175,4 +175,32 @@ void main() {
       expect(doc.data()!['readBy'], [me]);
     });
   });
+
+  group('Mute (M-7)', () {
+    test('toggleMute mirror: muting adds the caller to mutedBy', () async {
+      await db.collection('chats').doc(chatId).set({'participants': [me, them], 'mutedBy': <String>[]});
+
+      // Mirrors ChatProvider.toggleMute's arrayUnion branch.
+      await db.collection('chats').doc(chatId).update({
+        'mutedBy': FieldValue.arrayUnion([me]),
+      });
+
+      final doc = await db.collection('chats').doc(chatId).get();
+      expect(doc.data()!['mutedBy'], contains(me));
+    });
+
+    test('toggleMute mirror: unmuting removes only the caller, not other muters', () async {
+      await db.collection('chats').doc(chatId).set({'participants': [me, them], 'mutedBy': [me, them]});
+
+      // Mirrors ChatProvider.toggleMute's arrayRemove branch.
+      await db.collection('chats').doc(chatId).update({
+        'mutedBy': FieldValue.arrayRemove([me]),
+      });
+
+      final doc = await db.collection('chats').doc(chatId).get();
+      final mutedBy = List<String>.from(doc.data()!['mutedBy']);
+      expect(mutedBy, isNot(contains(me)));
+      expect(mutedBy, contains(them));
+    });
+  });
 }

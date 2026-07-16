@@ -209,6 +209,7 @@ final GoRouter appRouter = GoRouter(
         chatId: state.pathParameters['chatId'] ?? '',
         otherName: state.uri.queryParameters['name'] ?? 'Chat',
         otherPhotoUrl: state.uri.queryParameters['photo'],
+        otherUid: state.uri.queryParameters['otherUid'],
         isGroup: state.uri.queryParameters['group'] == 'true')),
 
     GoRoute(path: '/groups/:groupId',

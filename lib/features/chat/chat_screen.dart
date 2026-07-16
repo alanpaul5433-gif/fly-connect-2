@@ -228,6 +228,9 @@ class _ChatTile extends StatelessWidget {
     final unread = chat.unreadCount[currentUid] ?? 0;
     final isGroup = chat.type == 'group';
     final name = isGroup ? (chat.groupName ?? 'Group') : _otherName(chat, currentUid);
+    final otherUid = isGroup
+        ? null
+        : chat.participants.firstWhere((p) => p != currentUid, orElse: () => '');
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -266,7 +269,8 @@ class _ChatTile extends StatelessWidget {
             child: Center(child: Text(unread > 9 ? '9+' : '$unread',
               style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)))),
       ]),
-      onTap: () => context.push('/conversation/${chat.id}?name=${Uri.encodeComponent(name)}&group=$isGroup'),
+      onTap: () => context.push('/conversation/${chat.id}?name=${Uri.encodeComponent(name)}&group=$isGroup'
+          '${otherUid != null && otherUid.isNotEmpty ? '&otherUid=$otherUid' : ''}'),
     );
   }
 

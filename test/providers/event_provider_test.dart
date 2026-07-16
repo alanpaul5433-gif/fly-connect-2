@@ -23,11 +23,13 @@ void main() {
       String? title,
       String? description,
       String? location,
+      String? imageUrl,
     }) async {
       final updates = <String, dynamic>{};
       if (title != null) updates['title'] = title;
       if (description != null) updates['description'] = description;
       if (location != null) updates['location'] = location;
+      if (imageUrl != null) updates['imageUrl'] = imageUrl;
       if (updates.isEmpty) return;
       await db.collection('events').doc(eventId).update(updates);
     }
@@ -71,6 +73,16 @@ void main() {
       final data = (await db.collection('events').doc('evt-1').get()).data()!;
       expect(data['title'], 'Unchanged');
       expect(data.length, 1);
+    });
+
+    test('M-7: writes imageUrl for the cover-image edit path', () async {
+      await db.collection('events').doc('evt-1').set({'title': 'Meetup', 'imageUrl': null});
+
+      await updateEventMirror('evt-1', imageUrl: 'https://example.com/cover.png');
+
+      final data = (await db.collection('events').doc('evt-1').get()).data()!;
+      expect(data['imageUrl'], 'https://example.com/cover.png');
+      expect(data['title'], 'Meetup');
     });
   });
 
@@ -162,6 +174,16 @@ void main() {
       final snap = await db.collection('events').get();
       expect(snap.docs, hasLength(1));
       expect(snap.docs.first.data()['title'], 'Layover meetup');
+    });
+
+    test('M-7: a cover imageUrl set on the model round-trips into the doc', () async {
+      await addEventMirror({
+        'title': 'Layover meetup', 'createdBy': 'biz-1',
+        'imageUrl': 'https://example.com/cover.png',
+      });
+
+      final snap = await db.collection('events').get();
+      expect(snap.docs.first.data()['imageUrl'], 'https://example.com/cover.png');
     });
   });
 }
