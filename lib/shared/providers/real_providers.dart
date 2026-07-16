@@ -1111,6 +1111,41 @@ class PostProvider extends ChangeNotifier {
     });
   }
 
+  /// Updates an existing post's caption/location (M-7 post edit). Media is
+  /// intentionally not editable here. Owner-only is enforced server-side by
+  /// the existing posts rule (`isOwner(resource.data.authorId)`) — no rules
+  /// change needed.
+  Future<void> updatePost(String postId,
+      {required String caption, String? location}) async {
+    if (isMock) {
+      final i = _feed.indexWhere((p) => p.id == postId);
+      if (i != -1) {
+        final p = _feed[i];
+        _feed[i] = PostModel(
+          id: p.id, authorId: p.authorId, authorName: p.authorName,
+          authorPhotoUrl: p.authorPhotoUrl, mediaUrls: p.mediaUrls,
+          mediaType: p.mediaType, thumbnailUrl: p.thumbnailUrl,
+          aspectRatio: p.aspectRatio, durationMs: p.durationMs,
+          caption: caption, location: location, likeCount: p.likeCount,
+          commentCount: p.commentCount, isReported: p.isReported,
+          reportCount: p.reportCount, groupId: p.groupId,
+          createdAt: p.createdAt, editedAt: DateTime.now(),
+        );
+      }
+      notifyListeners();
+      return;
+    }
+    if (_uid == null) return;
+    await _db.collection('posts').doc(postId).update({
+      'caption': caption,
+      'location': location,
+      'editedAt': FieldValue.serverTimestamp(),
+    });
+    // No manual _feed splice: the live snapshot listener already delivers
+    // the updated doc, mirroring likePost/unlikePost's real-mode convention
+    // (see their comments a few methods up).
+  }
+
   // ── Generic content reporting (groups, chats, users) ────────
   Future<void> reportContent({
     required String targetType,   // 'group' | 'chat' | 'user' | 'comment'

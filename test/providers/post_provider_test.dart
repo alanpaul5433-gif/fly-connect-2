@@ -315,4 +315,24 @@ void main() {
       expect(users.docs.length, 0);
     });
   });
+
+  group('Post edit (M-7)', () {
+    test('updating a post writes caption/location/editedAt', () async {
+      await db.collection('posts').doc(postId).set({
+        'caption': 'original', 'location': null, 'authorId': uid,
+      });
+
+      // Mirrors PostProvider.updatePost's real-mode write.
+      await db.collection('posts').doc(postId).update({
+        'caption': 'edited caption',
+        'location': 'DXB',
+        'editedAt': FieldValue.serverTimestamp(),
+      });
+
+      final snap = await db.collection('posts').doc(postId).get();
+      expect(snap.data()!['caption'], 'edited caption');
+      expect(snap.data()!['location'], 'DXB');
+      expect(snap.data()!['editedAt'], isNotNull);
+    });
+  });
 }
