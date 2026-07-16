@@ -7,6 +7,8 @@ import '../../shared/providers/chat_provider.dart';
 import '../../shared/providers/auth_provider.dart';
 import '../../shared/providers/post_provider.dart';
 import '../../shared/models/models.dart';
+import 'package:image_picker/image_picker.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class ConversationScreen extends StatefulWidget {
   final String chatId;
@@ -63,6 +65,83 @@ class _ConversationScreenState extends State<ConversationScreen> {
         duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
       }
     });
+  }
+
+  Future<void> _pickAndSendImage(ImageSource source) async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: source);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    if (!mounted) return;
+    setState(() => _sending = true);
+    try {
+      final url = await context.read<ChatProvider>().uploadChatImage(bytes);
+      if (!mounted) return;
+      if (url == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Image upload failed. Please try again.'),
+          backgroundColor: Colors.red,
+        ));
+        return;
+      }
+      final caption = _ctrl.text.trim();
+      _ctrl.clear();
+      await context
+          .read<ChatProvider>()
+          .sendMessage(widget.chatId, caption, mediaUrl: url, mediaType: 'image');
+      if (!mounted) return;
+      _scrollToBottom();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send image: $e'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  void _showAttachSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.photo_camera_outlined),
+            title: const Text('Take photo'),
+            onTap: () {
+              Navigator.pop(context);
+              _pickAndSendImage(ImageSource.camera);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library_outlined),
+            title: const Text('Choose from gallery'),
+            onTap: () {
+              Navigator.pop(context);
+              _pickAndSendImage(ImageSource.gallery);
+            },
+          ),
+        ]),
+      ),
+    );
+  }
+
+  void _openFullscreenImage(String url) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: InteractiveViewer(
+            child: CachedFeedImage(url: url, fit: BoxFit.contain),
+          ),
+        ),
+      ),
+    );
   }
 
   void _showConversationMenu() {
@@ -243,7 +322,30 @@ class _ConversationScreenState extends State<ConversationScreen> {
                           // for incoming bubbles — primary fails contrast there.
                           // AppColors.dark gives 13.6:1 and reads clearly.
                           style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.dark)),
-                        Text(m.text, style: TextStyle(color: isMe ? AppColors.dark : Colors.black87, fontSize: 15)),
+                        if (m.mediaType == 'image' && m.mediaUrl != null) ...[
+                          GestureDetector(
+                            onTap: () => _openFullscreenImage(m.mediaUrl!),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: CachedFeedImage(
+                                url: m.mediaUrl!,
+                                width: 200,
+                                height: 200,
+                                fit: BoxFit.cover,
+                                placeholder: Container(
+                                  width: 200, height: 200, color: Colors.grey.shade200,
+                                  child: const Center(
+                                      child: CircularProgressIndicator(strokeWidth: 2))),
+                                errorWidget: Container(
+                                  width: 200, height: 200, color: Colors.grey.shade200,
+                                  child: const Icon(Icons.broken_image_outlined, color: Colors.grey)),
+                              ),
+                            ),
+                          ),
+                          if (m.text.isNotEmpty) const SizedBox(height: 6),
+                        ],
+                        if (m.text.isNotEmpty)
+                          Text(m.text, style: TextStyle(color: isMe ? AppColors.dark : Colors.black87, fontSize: 15)),
                         const SizedBox(height: 2),
                         Row(mainAxisSize: MainAxisSize.min, children: [
                           Text(timeago.format(m.createdAt, allowFromNow: true),
@@ -266,7 +368,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
           decoration: BoxDecoration(color: Colors.white,
             border: Border(top: BorderSide(color: Colors.grey.shade200))),
           child: Row(children: [
-            // Image attach hidden for v1.0 — image messages not yet wired to Storage.
+            IconButton(
+              icon: const Icon(Icons.add_photo_alternate_outlined, color: AppColors.dark),
+              tooltip: 'Attach photo',
+              onPressed: _sending ? null : _showAttachSheet,
+            ),
             Expanded(child: TextField(
               controller: _ctrl,
               onChanged: (v) => context.read<ChatProvider>().setTyping(widget.chatId, v.isNotEmpty),
