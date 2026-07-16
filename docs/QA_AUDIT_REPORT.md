@@ -35,12 +35,12 @@ The score is now capped almost entirely by the Store Listing/Console Setup gaps 
 | # | Category | Weight | Score | Notes |
 |---|----------|:------:|:-----:|-------|
 | 1 | Technical Build | 15% | 85 | R8 on, signed release, targetSdk 35, versionCode 4. Slow 5.3s cold start. |
-| 2 | Platform Manifests | 10% | 75 | Location permissions are now genuinely used (real geolocation, H-4 fixed); ATT string present but no prompt. |
+| 2 | Platform Manifests | 10% | 78 | Location permissions are now genuinely used (real geolocation, H-4 fixed); unused `NSUserTrackingUsageDescription` removed (M-9 fixed) — no more permission/behavior mismatch. |
 | 3 | Policy Compliance | 15% | 72 | Account deletion + UGC report/block real; legal pages 200 ✅. Privacy toggles now real and enforced (H-1 fixed). Email-verify not enforced; Data-Safety location mismatch. |
 | 4 | Store Listing | 10% | 50 | Not in repo — unverified (screenshots/description/feature graphic). |
 | 5 | Console Setup | 10% | 60 | Privacy URL 200 ✅. SHA registration & Maps-key restriction unverified. |
-| 6 | Backend / Firebase | 10% | 92 | Hardened rules deployed ✅ (C-1, plus C-3's `followers`/`matches`/`chats` tightenings), indexes deployed ✅ (C-2), PII subdoc rules live + all 22 existing user docs backfilled ✅ (H-2), 7 Cloud Functions live ✅ (C-3) with an Artifact Registry cleanup policy set. New minor finding: 7 legacy accounts still have a `number`/`latitude`/`longitude` PII duplicate outside H-2's scope, unaddressed. |
-| 7 | Feature Completeness | 15% | 88 | C-3 (notification producer) and C-4 (post deep-link) both fully fixed **and deployed** — real users now get in-app + push notifications for likes/comments/follows/matches/RSVPs/messages. Blocked-Users list now real (M-2 fixed). Saved-posts view, own-content delete, Settings persistence/enforcement, chat unread badges/read receipts, real geolocation (Nearby + SafeCheck), and the Events feed (past events no longer masquerade as upcoming; Featured no longer duplicates the list) all work (M-11, M-12, H-1, H-3, H-4, H-5 fixed). M-3's `isVerified` business-create gate is fixed and deployed; M-5's fire-and-forget create writes are fixed; M-6 Stories now persist to Storage/Firestore, fixed and deployed. Remaining gaps are all 🟡/🔵 (M-1's Auth hard-delete, M-7 through M-10, L-1 through L-7). |
+| 6 | Backend / Firebase | 10% | 93 | Hardened rules deployed ✅ (C-1, plus C-3's `followers`/`matches`/`chats` tightenings), indexes deployed ✅ (C-2), PII subdoc rules live + all 22 existing user docs backfilled ✅ (H-2), 7 Cloud Functions live ✅ (C-3) with an Artifact Registry cleanup policy set. **New:** `audit_log` rule added and `groups`/`events`/`posts`/`promotions` counter-forgery closed (L-2, L-3) — validated via MCP, **not yet deployed**. New minor finding: 7 legacy accounts still have a `number`/`latitude`/`longitude` PII duplicate outside H-2's scope, unaddressed. |
+| 7 | Feature Completeness | 15% | 89 | C-3 (notification producer) and C-4 (post deep-link) both fully fixed **and deployed** — real users now get in-app + push notifications for likes/comments/follows/matches/RSVPs/messages. Blocked-Users list now real (M-2 fixed). Saved-posts view, own-content delete, Settings persistence/enforcement, chat unread badges/read receipts, real geolocation (Nearby + SafeCheck), and the Events feed (past events no longer masquerade as upcoming; Featured no longer duplicates the list) all work (M-11, M-12, H-1, H-3, H-4, H-5 fixed). M-3/M-5/M-6/M-8/M-9/M-10 fixed and (where applicable) deployed; M-7 mostly fixed (chat mute + push suppression, event cover image, 3 of 4 admin no-ops — post edit and chat attachments deliberately deferred as their own tickets). Remaining gaps are 🟡 (M-1's Auth hard-delete, M-7's two deferred items) and 🔵 (L-1 through L-7, mostly closed — see Low Findings). |
 | 8 | Quality / Tests | 15% | 87 | 333 Flutter tests pass, analyze clean, no crashes. **New:** 51 mocked-Admin-SDK Cloud Functions unit tests + 7 tests run against a real Firestore/Functions emulator (first backend test coverage in the repo) — still not wired into CI (see L-6). |
 
 ---
@@ -180,15 +180,15 @@ The score is now capped almost entirely by the Store Listing/Console Setup gaps 
 
 ## 5. Low Findings (🔵)
 
-| ID | Finding | Evidence |
-|----|---------|----------|
-| L-1 | `followers` subcollection writable by any authed user (no `followerId == uid` check). | `firestore.rules:50` |
-| L-2 | `audit_log` has **no** Firestore rule → admin "unauthorized attempts are logged" promise silently fails (write is best-effort try/catch). | `firestore.rules` (absent) vs `real_providers.dart:164` |
-| L-3 | Any authed user can join/alter any group's `members`/`memberCount` and forge post/event/promo counters. | `firestore.rules:153,73,130,225` |
-| L-4 | Confirm Google Maps API key (`AndroidManifest.xml:79`, `AppDelegate.swift:11`) is restricted by package+SHA in GCP (quota-theft risk). | manifest/appdelegate |
-| L-5 | `flutter analyze`: 4 info lints (`curly_braces_in_flow_control_structures`). | `event_management_screen.dart:187-200` |
-| L-6 | Integration tests exist but are **not run in CI**; `test/tutorial.dart` is an empty scaffold. | `.github/workflows/ci.yml`, `test/tutorial.dart` |
-| L-7 | Slow cold start (**5.3s** TotalTime, measured via `am start -W` on API 31). | live measurement |
+| ID | Finding | Evidence | Fix / Notes |
+|----|---------|----------|-------------|
+| L-1 | ~~**`followers` subcollection writable by any authed user**~~ ✅ **Already fixed** — no `followerId == uid` check. | `firestore.rules:50` | **Already fixed and deployed** — turns out this was tightened as an unlabeled side effect of the C-3 rules pass (comment: "tightened for C-3, since this doc now drives a real push notification"). Confirmed via `firebase_get_security_rules` MCP that the deployed prod rule already reads `allow write: if isOwner(followerId) && isNotBanned() && followerId != userId;`. No new change needed — this entry was just stale in the report. |
+| L-2 | ~~**`audit_log` has no Firestore rule**~~ ✅ **Fixed 2026-07-16 (pending deploy)** — the admin "unauthorized attempts are logged" promise silently failed (write is best-effort try/catch). | `firestore.rules` (absent) vs `admin_audit_helper.dart` | **Fixed:** added a real `match /audit_log/{entryId}` block (admin-only read/create, append-only — no update/delete). Confirmed this was a genuine, live bug: every `logAdminAction()` call in the app (including the ones this same session's M-7 fixes just added — Ban Reporter, Request More Info, View Target) was silently failing under Firestore's default-deny, since no rule matched the collection at all — meaning the Audit Log page has likely never shown a real entry in production. Validated via MCP (`firebase_validate_security_rules`: OK). **Not yet deployed** — needs the same explicit go-ahead as prior rules changes. |
+| L-3 | ~~**Any authed user can join/alter any group's `members`/`memberCount` and forge post/event/promo counters**~~ ✅ **Fixed 2026-07-16 (pending deploy)**. | `firestore.rules:153,73,130,225` | **Fixed:** replaced the blanket `changedOnly([...])` carve-outs (which let any authed user write those fields to *any* value) with rules that mirror the actual write patterns used by every real call site (grepped `real_providers.dart` to confirm): **groups** members/memberCount and **events** rsvpList/rsvpCount now require the caller to add/remove only their *own* uid while the count moves by exactly ±1 in lockstep (a group admin or event creator/admin removing someone *else* already goes through a separate full-access clause, so this doesn't affect `removeMember`/`removeAttendee`); **posts** likeCount/commentCount now require an exact ±1 delta (matches `FieldValue.increment(1)`/`(-1)`, the only way the client ever writes them); **promotions**' `views`/`saves`/`currentRedemptions` carve-out was removed outright since grepping confirmed no client code writes any of those fields yet — it was pure unused attack surface. Validated via MCP: OK. Caveat: this repo has no Firestore-rules *behavioral* test harness (`@firebase/rules-unit-testing` + emulator) — correctness here rests on manually re-deriving every legitimate write site rather than an automated allow/deny test suite; adding that harness is a bigger, separate investment (relates to L-6). **Not yet deployed.** |
+| L-4 | Confirm Google Maps API key (`AndroidManifest.xml:79`, `AppDelegate.swift:11`) is restricted by package+SHA in GCP (quota-theft risk). | manifest/appdelegate | **Not actionable from code** — this is a Google Cloud Console setting (API key → Application restrictions), not a repo change. Still open. |
+| L-5 | ~~**`flutter analyze`: 4 info lints**~~ ✅ **Fixed 2026-07-16** (`curly_braces_in_flow_control_structures`). | `event_management_screen.dart:187-200` | **Fixed:** wrapped the two bare `else if`/`else` statement bodies in braces. `flutter analyze` now reports **zero issues** project-wide (previously the only 4 remaining infos). |
+| L-6 | Integration tests exist but are **not run in CI**; `test/tutorial.dart` is an empty scaffold. | `.github/workflows/ci.yml`, `test/tutorial.dart` | **Not fixed this pass** — modifying the CI pipeline isn't something to do without asking first (per this session's standing constraints); flagging for the user to decide whether/how to wire the Cloud Functions integration tests (needs a Firestore emulator step) into `.github/workflows/ci.yml`, and whether `test/tutorial.dart` should just be deleted. |
+| L-7 | Slow cold start (**5.3s** TotalTime, measured via `am start -W` on API 31). | live measurement | **Not fixed this pass** — this is a profiling/optimization project (likely Firebase init sequence, asset loading, or plugin registration overhead), not a one-line fix; needs its own investigation with `flutter run --profile` + DevTools traces rather than a guess-and-check change. |
 
 ---
 
@@ -248,7 +248,18 @@ The score is now capped almost entirely by the Store Listing/Console Setup gaps 
 | 14 | ~~Delete own post / own comment~~ ✅ **Done 2026-07-15** | 🟡 M-12 | done |
 | 15 | ~~Await create writes + surface errors~~ ✅ **Done 2026-07-16** | 🟡 M-5 | done |
 | 16 | ~~Back Stories with Storage/Firestore~~ ✅ **Done and deployed 2026-07-16** | 🟡 M-6 | done |
-| 17 | Remaining M/L items (ATT, edit-post, admin no-ops, analyze lints, CI integration tests) | 🟡/🔵 | varies |
+| 17 | ~~Distinguish offline vs. server error copy~~ ✅ **Done 2026-07-16** | 🟡 M-8 | done |
+| 18 | ~~Chat mute, event cover image, 3 admin no-op buttons~~ ✅ **Done 2026-07-16** (post edit + chat attachments deferred as separate tickets) | 🟡 M-7 | mostly done |
+| 19 | ~~Remove unused ATT string~~ ✅ **Done 2026-07-16** | 🟡 M-9 | done |
+| 20 | ~~Inline validation for empty Share~~ ✅ **Done 2026-07-16** | 🟡 M-10 | done |
+| 21 | ~~`flutter analyze`: fix 4 remaining info lints~~ ✅ **Done 2026-07-16** — analyze is now fully clean | 🔵 L-5 | done |
+| 22 | ~~Add `audit_log` rule + close counter-forgery in `groups`/`events`/`posts`/`promotions`~~ ✅ **Done 2026-07-16, validated via MCP, not yet deployed** | 🔵 L-2, L-3 | pending deploy |
+| 23 | `followers` self-only write | 🔵 L-1 | n/a — already fixed/deployed via C-3, report was stale |
+| 24 | Confirm Maps API key restriction in GCP Console | 🔵 L-4 | manual, external |
+| 25 | Wire integration tests into CI + delete/fill `test/tutorial.dart` | 🔵 L-6 | needs a decision — not done (CI changes need explicit go-ahead) |
+| 26 | Investigate 5.3s cold start | 🔵 L-7 | needs profiling, not attempted this pass |
+| 27 | Post edit (new feature: provider method + rules + edit screen) | 🟡 M-7 (deferred) | Large |
+| 28 | Chat attachment picker (`uploadChatImage` + image_picker UI) | 🟡 M-7 (deferred) | Medium |
 
 ---
 

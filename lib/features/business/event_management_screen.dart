@@ -184,8 +184,11 @@ class _EventManagementScreenState extends State<EventManagementScreen>
               setState(() {
                 if (status == 'approved') {
                   _approved.remove(u);
-                } else if (status == 'pending') _pending.remove(u);
-                else _declined.remove(u);
+                } else if (status == 'pending') {
+                  _pending.remove(u);
+                } else {
+                  _declined.remove(u);
+                }
               });
               try {
                 await context.read<EventProvider>().removeAttendee(widget.event.id, u.uid);
@@ -196,8 +199,11 @@ class _EventManagementScreenState extends State<EventManagementScreen>
                   setState(() {
                     if (status == 'approved') {
                       _approved.add(u);
-                    } else if (status == 'pending') _pending.add(u);
-                    else _declined.add(u);
+                    } else if (status == 'pending') {
+                      _pending.add(u);
+                    } else {
+                      _declined.add(u);
+                    }
                   });
                 }
                 messenger.showSnackBar(
