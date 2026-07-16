@@ -38,9 +38,12 @@ Future<void> main() async {
 
     // Crashlytics wiring (Crashlytics is not supported on web).
     if (!kIsWeb) {
+      // Register the error handlers synchronously so any early crash is
+      // captured. The collection-enabled toggle is a platform round-trip that
+      // nothing below depends on — fire it and don't block first frame (L-7).
       // Disable in debug to avoid polluting the dashboard with dev crashes.
-      await FirebaseCrashlytics.instance
-          .setCrashlyticsCollectionEnabled(!kDebugMode);
+      unawaited(FirebaseCrashlytics.instance
+          .setCrashlyticsCollectionEnabled(!kDebugMode));
 
       // Flutter framework errors -> Crashlytics
       FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
@@ -52,10 +55,12 @@ Future<void> main() async {
       };
     }
 
-    // Analytics: log app_open for install/activation funnel
-    try {
-      await FirebaseAnalytics.instance.logAppOpen();
-    } catch (_) {/* analytics is best-effort */}
+    // Analytics: log app_open for the install/activation funnel. Fire-and-
+    // forget — this is a network call and awaiting it delayed first frame
+    // (L-7 cold-start fix). Best-effort, so swallow any failure.
+    unawaited(
+      FirebaseAnalytics.instance.logAppOpen().then((_) {}, onError: (_) {}),
+    );
 
     // FCM: permission prompt + token storage + foreground listener
     unawaited(NotificationService.instance.init());
