@@ -16,6 +16,7 @@ import '../../shared/providers/user_provider.dart';
 import '../../shared/providers/promotion_provider.dart';
 import '../../shared/models/models.dart';
 import 'post_details_screen.dart';
+import 'edit_post_screen.dart';
 import 'story_viewer_screen.dart';
 import 'main_shell.dart' show AppDrawer;
 import '../../shared/widgets/cached_image.dart';
@@ -617,6 +618,12 @@ class _PostCardState extends State<_PostCard> {
   bool get _isOwnPost =>
       context.read<AuthProvider>().currentUser?.uid == widget.post.authorId;
 
+  void _editPost() {
+    Navigator.pop(context); // close the options sheet
+    Navigator.push(context,
+      MaterialPageRoute(builder: (_) => EditPostScreen(post: widget.post)));
+  }
+
   void _showOptions() {
     final isOwn = _isOwnPost;
     showModalBottomSheet(context: context, shape: const RoundedRectangleBorder(
@@ -630,11 +637,14 @@ class _PostCardState extends State<_PostCard> {
           leading: const Icon(Icons.link),
           title: const Text('Copy link'),
           onTap: () { Navigator.pop(context); _copyPostLink(); }),
-        if (isOwn)
+        if (isOwn) ...[
+          ListTile(leading: const Icon(Icons.edit_outlined),
+            title: const Text('Edit post'),
+            onTap: _editPost),
           ListTile(leading: const Icon(Icons.delete_outline, color: Colors.red),
             title: const Text('Delete post', style: TextStyle(color: Colors.red)),
-            onTap: () { Navigator.pop(context); _confirmDeletePost(); })
-        else
+            onTap: () { Navigator.pop(context); _confirmDeletePost(); }),
+        ] else
           ListTile(leading: const Icon(Icons.flag_outlined, color: Colors.red),
             title: const Text('Report post', style: TextStyle(color: Colors.red)),
             onTap: () async {
@@ -702,7 +712,10 @@ class _PostCardState extends State<_PostCard> {
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             GestureDetector(onTap: () => context.push('/users/${p.authorId}'),
               child: Text(p.authorName, style: AppTextStyles.labelMedium)),
-            Text(timeago.format(p.createdAt), style: AppTextStyles.caption),
+            Text(
+              '${timeago.format(p.createdAt)}${p.editedAt != null ? ' · edited' : ''}',
+              style: AppTextStyles.caption,
+            ),
           ])),
           IconButton(
             icon: const Icon(Icons.more_horiz, color: AppColors.textSecondary),
