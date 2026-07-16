@@ -103,6 +103,20 @@ class _AdminBusinessVerificationPageState
       'verificationStatus': 'rejected',
       'isVerified': false,
     });
+    // The confirm dialog above promises "They will be notified", but this
+    // write was previously missing — the rejection was silent. Mirrors
+    // _requestMoreInfo()'s notification shape below so NotificationProvider
+    // and the C-3 push fan-out pick it up like any other notification.
+    await FirebaseFirestore.instance.collection('notifications').add({
+      'uid': id,
+      'userId': id,
+      'title': 'Verification not approved',
+      'body':
+          'Your business verification wasn\'t approved. You can resubmit your documents for another review.',
+      'type': 'admin',
+      'isRead': false,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
     await logAdminAction(
       action: 'reject_business_verification',
       targetType: 'business',
