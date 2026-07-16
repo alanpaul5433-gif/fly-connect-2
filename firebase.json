@@ -1,1 +1,83 @@
-{"firestore":{"rules":"firestore.rules","indexes":"firestore.indexes.json"},"storage":{"rules":"storage.rules"},"hosting":[{"target":"admin","public":"build/admin_web","ignore":["firebase.json","**/.*","**/node_modules/**"],"rewrites":[{"source":"**","destination":"/index.html"}]}],"flutter":{"platforms":{"android":{"default":{"projectId":"flyconnect-ab4f2","appId":"1:361504801284:android:7b9682e73d98c7fbc0ab51","fileOutput":"android/app/google-services.json"}},"ios":{"default":{"projectId":"flyconnect-ab4f2","appId":"1:361504801284:ios:8a69029e723e238dc0ab51","uploadDebugSymbols":true,"fileOutput":"ios/Runner/GoogleService-Info.plist"}},"dart":{"lib/firebase_options.dart":{"projectId":"flyconnect-ab4f2","configurations":{"android":"1:361504801284:android:7b9682e73d98c7fbc0ab51","ios":"1:361504801284:ios:8a69029e723e238dc0ab51","web":"1:361504801284:web:891ccdee6e7143f3c0ab51"}}}}}}
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "hosting": [
+    {
+      "target": "admin",
+      "public": "build/admin_web",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
+    }
+  ],
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "flyconnect-ab4f2",
+          "appId": "1:361504801284:android:7b9682e73d98c7fbc0ab51",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "ios": {
+        "default": {
+          "projectId": "flyconnect-ab4f2",
+          "appId": "1:361504801284:ios:8a69029e723e238dc0ab51",
+          "uploadDebugSymbols": true,
+          "fileOutput": "ios/Runner/GoogleService-Info.plist"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "flyconnect-ab4f2",
+          "configurations": {
+            "android": "1:361504801284:android:7b9682e73d98c7fbc0ab51",
+            "ios": "1:361504801284:ios:8a69029e723e238dc0ab51",
+            "web": "1:361504801284:web:891ccdee6e7143f3c0ab51"
+          }
+        }
+      }
+    }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ]
+    }
+  ],
+  "emulators": {
+    "firestore": {
+      "port": 8080
+    },
+    "functions": {
+      "port": 5001
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
+  }
+}

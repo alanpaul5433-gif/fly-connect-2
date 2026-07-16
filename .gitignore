@@ -52,3 +52,4 @@ ios/Runner/GoogleService-Info.plist
 
 # Local Claude Code settings
 .claude/
+.firebase/
