@@ -23,6 +23,24 @@ class _AdminBusinessVerificationPageState
     _fetchBusinesses();
   }
 
+  /// ein/licenseNumber live in the owner+admin-only `users/{uid}/private/data`
+  /// subdoc (not the broadly-readable main doc — see the business-
+  /// verification signup design doc), so fan out one extra read per row to
+  /// merge them back in. Mirrors `admin_users_page.dart`'s `_withPrivateData`
+  /// for the identical email/phone situation.
+  Future<List<Map<String, dynamic>>> _withPrivateData(
+      List<Map<String, dynamic>> docs) async {
+    return Future.wait(docs.map((data) async {
+      final id = data['id'] as String;
+      try {
+        final privateDoc = await FirebaseFirestore.instance
+            .collection('users').doc(id).collection('private').doc('data').get();
+        if (privateDoc.exists) return {...data, ...privateDoc.data()!};
+      } catch (_) {/* fail open — card still renders without ein/license */}
+      return data;
+    }));
+  }
+
   Future<void> _fetchBusinesses() async {
     setState(() => _loading = true);
     try {
@@ -32,12 +50,15 @@ class _AdminBusinessVerificationPageState
           .limit(100)
           .get();
       if (!mounted) return;
+      final docs = snapshot.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        return data;
+      }).toList();
+      final withPrivate = await _withPrivateData(docs);
+      if (!mounted) return;
       setState(() {
-        _businesses = snapshot.docs.map((doc) {
-          final data = doc.data();
-          data['id'] = doc.id;
-          return data;
-        }).toList();
+        _businesses = withPrivate;
       });
     } catch (e) {
       debugPrint('[AdminBusinessVerify] fetch failed: $e');
