@@ -213,7 +213,7 @@ class AuthProvider extends ChangeNotifier {
     required String name, required String email, required String password,
     String? phone, String? airline, String? airport, String? position,
     String? city, String? state, String role = 'user', String? bio,
-    DateTime? dob,
+    DateTime? dob, String? ein, String? licenseNumber,
   }) async {
     _loading = true; _error = null; notifyListeners();
 
@@ -246,15 +246,24 @@ class AuthProvider extends ChangeNotifier {
       // see firestore.rules and H-2 in docs/QA_AUDIT_REPORT.md). DOB is not
       // on UserModel because most code shouldn't need it — it's stored as an
       // extra field for audit + future age verification (Apple 5.1.1, Play
-      // Families policy, GDPR Article 8 / COPPA).
+      // Families policy, GDPR Article 8 / COPPA). ein/licenseNumber follow
+      // the same pattern for the same reason — see the business-verification
+      // signup design doc.
       final docData = user.toFirestore()..remove('email')..remove('phone');
       docData['termsAcceptedAt'] = FieldValue.serverTimestamp();
+      if (role == 'business') {
+        docData['verificationStatus'] = 'pending';
+      }
       await _db.collection('users').doc(user.uid).set(docData);
 
       final privateData = <String, dynamic>{'email': email, 'phone': phone};
       if (dob != null) {
         privateData['dob'] = Timestamp.fromDate(dob);
         privateData['ageVerifiedAt'] = FieldValue.serverTimestamp();
+      }
+      if (ein != null && ein.isNotEmpty) privateData['ein'] = ein;
+      if (licenseNumber != null && licenseNumber.isNotEmpty) {
+        privateData['licenseNumber'] = licenseNumber;
       }
       await _db.collection('users').doc(user.uid)
           .collection('private').doc('data').set(privateData);
