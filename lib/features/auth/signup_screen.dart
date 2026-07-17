@@ -59,6 +59,8 @@ class _SignupScreenState extends State<SignupScreen> {
   final _bioCtrl = TextEditingController();
   final _bizNameCtrl = TextEditingController();
   final _websiteCtrl = TextEditingController();
+  final _einCtrl = TextEditingController();
+  final _licenseCtrl = TextEditingController();
   bool _obscure = true;
 
   String? _selectedAirline;
@@ -78,6 +80,7 @@ class _SignupScreenState extends State<SignupScreen> {
     _phoneCtrl.dispose(); _airportCtrl.dispose(); _cityCtrl.dispose();
     _stateCtrl.dispose(); _bioCtrl.dispose();
     _bizNameCtrl.dispose(); _websiteCtrl.dispose();
+    _einCtrl.dispose(); _licenseCtrl.dispose();
     super.dispose();
   }
 
@@ -209,6 +212,8 @@ class _SignupScreenState extends State<SignupScreen> {
         state: _stateCtrl.text.trim().isEmpty ? null : _stateCtrl.text.trim(),
         role: 'business',
         bio: bizBio.isEmpty ? null : bizBio,
+        ein: _einCtrl.text.trim().isEmpty ? null : _einCtrl.text.trim(),
+        licenseNumber: _licenseCtrl.text.trim().isEmpty ? null : _licenseCtrl.text.trim(),
       );
     } else {
       ok = await auth.signup(
@@ -469,6 +474,14 @@ class _SignupScreenState extends State<SignupScreen> {
             AppTextField(hint: 'Website (optional)', controller: _websiteCtrl,
               keyboardType: TextInputType.url,
               prefixIcon: const Icon(Icons.language_outlined, size: 20)),
+            const SizedBox(height: 14),
+            Row(children: [
+              Expanded(child: AppTextField(hint: 'EIN (optional)', controller: _einCtrl,
+                prefixIcon: const Icon(Icons.numbers, size: 20))),
+              const SizedBox(width: 12),
+              Expanded(child: AppTextField(hint: 'License Number (optional)', controller: _licenseCtrl,
+                prefixIcon: const Icon(Icons.badge_outlined, size: 20))),
+            ]),
             const SizedBox(height: 14),
             Row(children: [
               Expanded(child: AppTextField(hint: 'City', controller: _cityCtrl)),

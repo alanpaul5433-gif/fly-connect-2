@@ -165,6 +165,57 @@ void main() {
     expect(find.text('Business Name'), findsOneWidget);
   });
 
+  testWidgets('business signup passes EIN and License Number to signup()',
+      (tester) async {
+    when(() => authProvider.signup(
+          name: any(named: 'name'),
+          email: any(named: 'email'),
+          password: any(named: 'password'),
+          city: any(named: 'city'),
+          state: any(named: 'state'),
+          role: any(named: 'role'),
+          bio: any(named: 'bio'),
+          ein: any(named: 'ein'),
+          licenseNumber: any(named: 'licenseNumber'),
+        )).thenAnswer((_) async => true);
+    when(() => authProvider.userRole).thenReturn('business');
+
+    await _pumpScreen(tester, authProvider: authProvider);
+
+    await tester.tap(find.text('Business'));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField).at(0), 'lounge@delta.com');
+    await tester.enterText(find.byType(TextField).at(1), 'Password123');
+    await _agreeToTerms(tester);
+    await tester.tap(find.widgetWithText(PrimaryButton, 'Continue'));
+    await tester.pumpAndSettle();
+
+    // Business step 2 TextFields in build order (the Category dropdown is a
+    // DropdownButtonFormField, not a TextField, so it doesn't occupy an
+    // index): 0=Business Name, 1=Website, 2=EIN, 3=License Number, 4=City,
+    // 5=State, 6=Bio. Matches this file's existing index-based convention
+    // (see the step-1 email/password test above) rather than finding by
+    // hint text, which isn't used anywhere else in this file.
+    await tester.enterText(find.byType(TextField).at(0), 'Sky Lounge');
+    await tester.enterText(find.byType(TextField).at(2), '12-3456789');
+    await tester.enterText(find.byType(TextField).at(3), 'LIC-998877');
+
+    await tester.tap(find.widgetWithText(PrimaryButton, 'Create Account'));
+    await tester.pumpAndSettle();
+
+    verify(() => authProvider.signup(
+          name: any(named: 'name'),
+          email: any(named: 'email'),
+          password: any(named: 'password'),
+          city: any(named: 'city'),
+          state: any(named: 'state'),
+          role: 'business',
+          bio: any(named: 'bio'),
+          ein: '12-3456789',
+          licenseNumber: 'LIC-998877',
+        )).called(1);
+  });
+
   testWidgets('Google signup without consent shows a snackbar and never calls signInWithGoogle',
       (tester) async {
     await _pumpScreen(tester, authProvider: authProvider);
