@@ -33,9 +33,18 @@ service cloud.firestore {
     // ── Users ──────────────────────────────────────────────
     match /users/{userId} {
       allow read: if isAuth();
+      // isVerified/verificationStatus must not be settable by the client at
+      // create time — otherwise a business signup could write isVerified:
+      // true (or verificationStatus:'verified') in the same write that
+      // creates the account, fully bypassing isVerifiedBusiness()'s
+      // admin-approval gate (found while wiring up the verification-status
+      // submission flow below).
       allow create: if isOwner(userId)
         && request.resource.data.role in ['user', 'business']  // admins created server-side
-        && request.resource.data.isBanned == false;
+        && request.resource.data.isBanned == false
+        && request.resource.data.isVerified == false
+        && (!('verificationStatus' in request.resource.data)
+            || request.resource.data.verificationStatus in ['none', 'pending']);
       // Users may edit their own profile but not role/ban/verified flags.
       // Admins may touch anything.
       allow update: if isAdmin()
