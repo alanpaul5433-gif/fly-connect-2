@@ -131,6 +131,22 @@ void main() {
       final snap = await db.collection('users').doc(uid).get();
       expect(snap.data()!.containsKey('verificationStatus'), false);
     });
+
+    test('OAuth business account doc shape: verificationStatus pending '
+        '(mirrors email/password path)', () async {
+      const uid = 'oauth-biz-uid-1';
+      await db.collection('users').doc(uid).set({
+        'uid': uid,
+        'name': 'Sky Lounge (Google)',
+        'email': 'lounge@gmail.com',
+        'role': 'business',
+        'isBanned': false,
+        'isVerified': false,
+        'verificationStatus': 'pending',
+      });
+      final snap = await db.collection('users').doc(uid).get();
+      expect(snap.data()!['verificationStatus'], 'pending');
+    });
   });
 
   group('Account deletion logic', () {

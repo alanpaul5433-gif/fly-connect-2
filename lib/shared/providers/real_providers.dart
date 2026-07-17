@@ -598,7 +598,11 @@ class AuthProvider extends ChangeNotifier {
       passportStamps: [],
       travelHistory: [],
     );
-    await ref.set(newUser.toFirestore());
+    final docData = newUser.toFirestore();
+    if (role == 'business') {
+      docData['verificationStatus'] = 'pending';
+    }
+    await ref.set(docData);
     _currentUser = newUser;
   }
 
