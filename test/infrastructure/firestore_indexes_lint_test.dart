@@ -286,8 +286,29 @@ final List<_QuerySpec> _queries = [
     orderBy: 'createdAt',
   ),
   const _QuerySpec(
-    label: 'safeCheck stream (admin + SafeCheckProvider)',
+    label: 'safeCheck stream (admin, unconstrained)',
     collection: 'safeChecks',
+    orderBy: 'createdAt',
+  ),
+  // H18: SafeCheckProvider now runs one constrained subscription per
+  // visibility branch, because the rules only admit a provably-scoped query.
+  const _QuerySpec(
+    label: 'safeChecks visible to everyone (SafeCheckProvider "all"/"verified")',
+    collection: 'safeChecks',
+    equalities: ['visibility'],
+    orderBy: 'createdAt',
+  ),
+  const _QuerySpec(
+    label: 'own safeCheck history (SafeCheckProvider "mine")',
+    collection: 'safeChecks',
+    equalities: ['userId'],
+    orderBy: 'createdAt',
+  ),
+  const _QuerySpec(
+    label: 'friends-only safeChecks (SafeCheckProvider "friends")',
+    collection: 'safeChecks',
+    equalities: ['visibility'],
+    arrayContains: 'visibleTo',
     orderBy: 'createdAt',
   ),
   const _QuerySpec(

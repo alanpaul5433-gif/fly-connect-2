@@ -2196,7 +2196,6 @@ class SafeCheckProvider extends ChangeNotifier {
   List<SafeCheckModel> _checkIns = [];
   SafeCheckModel? _myLatestCheckIn;
   bool _loading = false;
-  StreamSubscription? _checkInSub;
 
   List<SafeCheckModel> get checkIns => _checkIns;
   SafeCheckModel? get myLatestCheckIn => _myLatestCheckIn;
@@ -2207,19 +2206,86 @@ class SafeCheckProvider extends ChangeNotifier {
     if (isMock) _checkIns = List.from(mockSafeChecks);
   }
 
+  // One subscription per visibility branch — see below.
+  final List<StreamSubscription> _checkInSubs = [];
+  final Map<String, List<SafeCheckModel>> _checkInsBySource = {};
+  String? _viewerUid;
+
   void updateAuth(AuthProvider auth) {
     if (isMock) return;
-    _checkInSub?.cancel();
-    _checkInSub = _db.collection('safeChecks')
-        .orderBy('createdAt', descending: true).limit(100).snapshots().listen((snap) {
-      _checkIns = snap.docs.map((d) => SafeCheckModel.fromFirestore(d)).toList();
-      final uid = auth.currentUser?.uid;
-      if (uid != null) {
-        final my = _checkIns.where((c) => c.userId == uid && c.isActive).toList();
-        _myLatestCheckIn = my.isNotEmpty ? my.first : null;
-      }
+    final uid = auth.currentUser?.uid;
+    _viewerUid = uid;
+
+    for (final sub in _checkInSubs) {
+      sub.cancel();
+    }
+    _checkInSubs.clear();
+    _checkInsBySource.clear();
+
+    if (uid == null) {
+      _checkIns = [];
       notifyListeners();
-    });
+      return;
+    }
+
+    // H18: the old single `orderBy(createdAt).limit(100)` scan is now rejected
+    // outright — firestore.rules only admits a safeChecks query that is
+    // provably within one visibility branch, and Firestore fails an entire
+    // query if any matched document is denied. So each branch the viewer is
+    // entitled to gets its own constrained subscription, merged client-side.
+    final base = _db.collection('safeChecks');
+
+    _listenBranch('all',
+        base.where('visibility', isEqualTo: 'all'));
+    _listenBranch('mine',
+        base.where('userId', isEqualTo: uid));
+    _listenBranch('friends',
+        base.where('visibility', isEqualTo: 'friends')
+            .where('visibleTo', arrayContains: uid));
+
+    // 'verified' check-ins are readable only by verified readers; querying it
+    // as an unverified user would be denied, taking the whole stream with it.
+    if (auth.currentUser?.isVerified == true) {
+      _listenBranch('verified',
+          base.where('visibility', isEqualTo: 'verified'));
+    }
+  }
+
+  void _listenBranch(String source, Query query) {
+    _checkInSubs.add(
+      query.orderBy('createdAt', descending: true).limit(100).snapshots().listen(
+        (snap) {
+          _checkInsBySource[source] =
+              snap.docs.map((d) => SafeCheckModel.fromFirestore(d)).toList();
+          _recombine();
+        },
+        onError: (_) {
+          // A denied or failed branch must not blank out the others.
+          _checkInsBySource[source] = const [];
+          _recombine();
+        },
+      ),
+    );
+  }
+
+  void _recombine() {
+    // Branches overlap (a friends-only check-in of my own matches both 'mine'
+    // and 'friends'), so dedupe by document id before sorting.
+    final byId = <String, SafeCheckModel>{};
+    for (final list in _checkInsBySource.values) {
+      for (final c in list) {
+        byId[c.id] = c;
+      }
+    }
+    _checkIns = byId.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    final uid = _viewerUid;
+    if (uid != null) {
+      final my = _checkIns.where((c) => c.userId == uid && c.isActive).toList();
+      _myLatestCheckIn = my.isNotEmpty ? my.first : null;
+    }
+    notifyListeners();
   }
 
   List<SafeCheckModel> nearbyCheckIns(String city) =>
@@ -2236,14 +2302,35 @@ class SafeCheckProvider extends ChangeNotifier {
     required String status, String? message, required String city,
     double? lat, double? lng, required String userId,
     required String userName, String? userPhotoUrl,
+    // H18: denormalised from the author's SafeCheck Visibility setting so
+    // firestore.rules can enforce it. Defaults to the widest setting, matching
+    // the previous behaviour for anyone who never touched the control.
+    String visibility = 'all',
   }) async {
     _loading = true; notifyListeners();
     final now = DateTime.now();
+
+    // For "Friends Only", capture the author's followers as the audience. Read
+    // once at write time; the 24h expiry bounds how stale it can get.
+    var visibleTo = const <String>[];
+    if (!isMock && visibility == 'friends') {
+      try {
+        final followers = await _db
+            .collection('users').doc(userId).collection('followers').get();
+        visibleTo = followers.docs.map((d) => d.id).toList();
+      } catch (_) {
+        // Fail closed: an empty audience hides the check-in from everyone but
+        // its author, which is the safer error for a privacy control.
+        visibleTo = const [];
+      }
+    }
+
     final checkIn = SafeCheckModel(
       id: 'sc_${now.millisecondsSinceEpoch}', userId: userId,
       userName: userName, userPhotoUrl: userPhotoUrl,
       status: status, message: message, city: city, lat: lat, lng: lng,
-      createdAt: now, expiresAt: now.add(const Duration(hours: 24)));
+      createdAt: now, expiresAt: now.add(const Duration(hours: 24)),
+      visibility: visibility, visibleTo: visibleTo);
     if (isMock) {
       _checkIns.removeWhere((c) => c.userId == userId && c.isActive);
       _checkIns.insert(0, checkIn);
@@ -2269,5 +2356,11 @@ class SafeCheckProvider extends ChangeNotifier {
   }
 
   @override
-  void dispose() { _checkInSub?.cancel(); super.dispose(); }
+  void dispose() {
+    for (final sub in _checkInSubs) {
+      sub.cancel();
+    }
+    _checkInSubs.clear();
+    super.dispose();
+  }
 }

@@ -24,6 +24,12 @@ service cloud.firestore {
     function isNotBanned() {
       return isAuth() && !get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isBanned;
     }
+    // The READER's own verified flag — used by SafeCheck's "Verified Users"
+    // visibility (H18). Unlike a follower check, this is a property of the
+    // caller rather than of each document, so it is cheap and query-compatible.
+    function isVerifiedUser() {
+      return isAuth() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isVerified == true;
+    }
     // A client may change only the listed field names on update.
     // Defensive so no user can escalate role/ban flags via the client.
     function changedOnly(allowedFields) {
@@ -321,7 +327,25 @@ service cloud.firestore {
 
     // ── SafeChecks ────────────────────────────────────────
     match /safeChecks/{checkId} {
-      allow read: if isAuth() && isNotBanned();
+      // H18: "SafeCheck Visibility" (Everyone / Friends Only / Verified Users)
+      // was enforced only in Dart while this rule was `if isAuth()`, so any
+      // signed-in user could read every check-in — status, free-text message,
+      // city and precise lat/lng — whatever the author had chosen. On a
+      // personal-safety feature that setting is the entire point.
+      //
+      // As with posts, Firestore fails the whole query if any matched document
+      // is denied, so the client must constrain its query to one of these
+      // branches (see SafeCheckProvider).
+      //
+      // No backfill: check-ins carry a 24h expiresAt, so documents written
+      // before `visibility` existed simply age out.
+      allow read: if isAuth() && isNotBanned() && (
+           resource.data.visibility == 'all'
+        || isOwner(resource.data.userId)
+        || (resource.data.visibility == 'verified' && isVerifiedUser())
+        || (resource.data.visibility == 'friends'
+            && request.auth.uid in resource.data.visibleTo)
+      );
       allow create: if isAuth() && isNotBanned()
         && request.resource.data.userId == request.auth.uid;
       allow update: if isOwner(resource.data.userId) || isAdmin();

@@ -680,11 +680,22 @@ class SafeCheckModel {
   final DateTime createdAt;
   final DateTime? expiresAt;
 
+  /// Who may read this check-in: 'all', 'verified' or 'friends'. Denormalised
+  /// from the author's SafeCheck Visibility setting at write time because
+  /// firestore.rules enforces it per document — see H18. Defaults to 'all' so
+  /// a legacy document is never mis-parsed as more private than it was.
+  final String visibility;
+
+  /// Audience for `visibility == 'friends'`: the author's follower uids,
+  /// captured at write time. Staleness is bounded by the 24h expiry.
+  final List<String> visibleTo;
+
   const SafeCheckModel({
     required this.id, required this.userId, required this.userName,
     this.userPhotoUrl, required this.status, this.message,
     required this.city, this.lat, this.lng,
     required this.createdAt, this.expiresAt,
+    this.visibility = 'all', this.visibleTo = const [],
   });
 
   bool get isActive => expiresAt == null || expiresAt!.isAfter(DateTime.now());
@@ -696,12 +707,15 @@ class SafeCheckModel {
     lat: (d['lat'] as num?)?.toDouble(), lng: (d['lng'] as num?)?.toDouble(),
     createdAt: d['createdAt'] is DateTime ? d['createdAt'] : DateTime.now(),
     expiresAt: d['expiresAt'] is DateTime ? d['expiresAt'] : null,
+    visibility: d['visibility'] as String? ?? 'all',
+    visibleTo: List<String>.from(d['visibleTo'] ?? const []),
   );
 
   Map<String, dynamic> toMap() => {
     'userId': userId, 'userName': userName, 'userPhotoUrl': userPhotoUrl,
     'status': status, 'message': message, 'city': city,
     'lat': lat, 'lng': lng, 'createdAt': createdAt, 'expiresAt': expiresAt,
+    'visibility': visibility, 'visibleTo': visibleTo,
   };
 
   factory SafeCheckModel.fromFirestore(DocumentSnapshot doc) {

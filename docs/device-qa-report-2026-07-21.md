@@ -109,7 +109,7 @@ Play has required in-app account deletion since May 2024; the App Store requires
 | H15 **[CODE]** | `real_providers.dart:1870` | Candidate query excludes neither already-matched/passed users nor blocked users. **Passed profiles come straight back**, and `passUser` `add()`s a fresh doc per pass (duplicate rows forever). |
 | H16 **[CODE]** | `settings_screen.dart:130-141` | All six push toggles are persisted to `users/{uid}.settings` and **read by nobody** — not by any Dart file, not by `functions/src/pushFanout.ts`. Turning off "Messages" changes nothing. |
 | H17 **[CODE]** | `nearby_users_screen.dart:135` | Location privacy reads `AuthProvider.currentUser.settings`, but Settings writes via `UserProvider.updateProfile`. `AuthProvider` never refreshes → **turning off location sharing has no effect until app restart**; coordinates keep uploading. |
-| H18 **[CODE]** | `firestore.rules:296` | SafeCheck Visibility (Friends / Verified only) is **client-side only**. `safeChecks` is `allow read: if isAuth()` — any signed-in user can read every check-in's status, message, city and lat/lng. |
+| H18 ✅ **FIXED** | `firestore.rules:296` | SafeCheck Visibility (Friends / Verified only) was **client-side only**. `safeChecks` was `allow read: if isAuth()` — any signed-in user could read every check-in's status, message, city and lat/lng. See below. |
 | H19 **[CODE]** | `analytics_screen.dart:62`, `dashboard_screen.dart:15` | Business analytics iterate the **global** promotions/events collections, not `myPromotions(uid)`. **Business A sees Business B's** deal titles, views, saves and redemptions. |
 | H20 **[CODE]** | `analytics_screen.dart:41`, `business_profile_screen.dart:119` | Growth `+12%`, Reach `8,420`, Engagement `4.2%`, Followers `2,840`, Events `3` are **hardcoded literals** presented as real metrics. Only the bar chart carries a "Demo chart" badge. |
 | H21 **[CODE]** | `promotion_detail_screen.dart:120` | "Show this QR code at the venue" is a 6×6 `GridView` coloured by `i % 3 == 0`. **It is not a QR code** and encodes nothing. Redemption counters are never incremented anywhere. |
@@ -119,6 +119,24 @@ Play has required in-app account deletion since May 2024; the App Store requires
 | H25 **[CODE]** | `conversation_screen.dart:378` | `setTyping` fires on **every keystroke** (one Firestore write per character, no debounce) and is **never cleared** on send or dispose — the other party sees "typing…" forever. |
 
 ---
+
+### H18. SafeCheck visibility enforced only in Dart — ✅ FIXED 2026-07-21
+`firestore.rules` (safeChecks), `SafeCheckProvider`, `SafeCheckModel`
+
+The setting offered Everyone / Friends Only / Verified Users, but the rule was `allow read: if isAuth() && isNotBanned()` and the filtering happened while rendering. Any signed-in user could read every check-in document directly — status, free-text message, city, and precise lat/lng. On a personal-safety feature, that setting is the entire point. Proven by rules test before fixing.
+
+**Fix applied:**
+- Visibility is denormalised onto each check-in (`visibility`, plus `visibleTo` for the Friends case) and enforced in `firestore.rules`. Four branches: `all`, author, `verified` (checked against the **reader's** own `isVerified` via the new `isVerifiedUser()` helper — a property of the caller, so it stays cheap), and `friends` (reader present in `visibleTo`).
+- `SafeCheckProvider` replaced its single unconstrained `orderBy(createdAt).limit(100)` scan — now rejected outright — with **one constrained subscription per branch the viewer is entitled to**, merged and deduped client-side. The `verified` branch is only subscribed when the viewer is actually verified; querying it otherwise would be denied and take the stream down with it.
+- `visibleTo` is captured from the author's followers at write time. Staleness is bounded by the existing 24h expiry — the reason this denormalisation is acceptable here but was rejected for posts.
+- Friends audience **fails closed**: if the follower read fails, `visibleTo` is empty, so the check-in is hidden from everyone but its author.
+- Three new composite indexes, all caught by the index lint registry.
+
+**No backfill needed** — unlike B2. Check-ins carry a 24h `expiresAt`, so documents written before `visibility` existed age out on their own. A rules test pins that they're author-only until then.
+
+**Coverage:** `functions/test/rules/safechecks.rules.test.ts` (14 tests) and `test/models/safe_check_model_test.dart` (5 tests). One test records a sharp edge worth knowing: an `array-contains` on `visibleTo` **alone** is denied — the query must pin `visibility == 'friends'` as well, or Firestore can't prove the branch.
+
+**Not covered by test:** the provider's multi-subscription merge. `SafeCheckProvider` hard-codes `FirebaseFirestore.instance`, the same DI limitation as elsewhere. The query *shapes* it issues are covered by the rules tests; the merge/dedupe logic is not.
 
 ## Missing components
 

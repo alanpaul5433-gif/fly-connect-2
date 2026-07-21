@@ -583,6 +583,11 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
                     userId: user.uid,
                     userName: user.name,
                     userPhotoUrl: user.photoUrl,
+                    // Carry the author's own visibility choice onto the
+                    // document so firestore.rules can enforce it (H18) —
+                    // previously this was only ever applied when rendering.
+                    visibility:
+                        (user.settings['nearbyVisibility'] as String?) ?? 'all',
                   );
                   if (ctx.mounted) Navigator.pop(ctx);
                   scaffoldMessenger.showSnackBar(SnackBar(
