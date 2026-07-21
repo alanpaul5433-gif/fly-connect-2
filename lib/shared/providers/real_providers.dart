@@ -12,6 +12,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:crypto/crypto.dart';
 import '../utils/account_deletion.dart';
+import '../utils/block_list.dart';
 import '../utils/image_compress.dart';
 import '../utils/report_rate_limiter.dart';
 import '../models/models.dart';
@@ -852,7 +853,34 @@ class PostProvider extends ChangeNotifier {
   bool get feedHasMore => _feedHasMore;
   bool get feedLoadingMore => _feedLoadingMore;
 
-  void listenFeed() {
+  /// Uids whose posts must never reach this viewer — people they blocked and
+  /// people who blocked them. Applied client-side because Firestore can't
+  /// express it: `not-in` caps at 10 and won't combine with the feed ordering.
+  Set<String> _blockedUids = {};
+  /// False until the block list has been read at least once. The feed refuses
+  /// to render while this is false rather than showing unfiltered content.
+  bool _blockedReady = false;
+
+  Future<void> _loadBlocked() async {
+    final uid = _uid;
+    if (uid == null) {
+      _blockedUids = {};
+      _blockedReady = true;
+      return;
+    }
+    try {
+      _blockedUids = await fetchBlockedUids(_db, uid);
+      _blockedReady = true;
+    } catch (_) {
+      // Keep whatever set we already had: a transient failure must not
+      // resurrect blocked content. If we have never loaded one, _blockedReady
+      // stays false and listenFeed reports an error instead of rendering an
+      // unfiltered feed — failing closed, since the alternative is showing a
+      // user the exact person they blocked.
+    }
+  }
+
+  Future<void> listenFeed() async {
     if (isMock) { _feed = List.from(mockPosts); notifyListeners(); return; }
     _feedSub?.cancel();
     _feedLimit = _feedPageSize;
@@ -861,6 +889,13 @@ class PostProvider extends ChangeNotifier {
     // user taps Retry; if the new subscription also fails, onError below
     // will set it again.
     _feedError = null;
+
+    await _loadBlocked();
+    if (!_blockedReady) {
+      _feedError = 'Could not load the feed.';
+      notifyListeners();
+      return;
+    }
     _resubscribeFeed();
   }
 
@@ -876,9 +911,15 @@ class PostProvider extends ChangeNotifier {
         .limit(_feedLimit)
         .snapshots()
         .listen((snap) {
-      _feed = snap.docs.map((d) => PostModel.fromFirestore(d)).toList();
-      // If we got fewer than the limit, there's nothing more to fetch.
-      _feedHasMore = _feed.length >= _feedLimit;
+      _feed = withoutBlocked(
+        snap.docs.map((d) => PostModel.fromFirestore(d)).toList(),
+        _blockedUids,
+        (p) => p.authorId,
+      );
+      // Measured on the RAW page, not the filtered list: blocked posts still
+      // consumed slots in the query, so a full page that filters down to three
+      // items still has more behind it.
+      _feedHasMore = snap.docs.length >= _feedLimit;
       _feedLoadingMore = false;
       // Successful snapshot clears any prior error.
       if (_feedError != null) _feedError = null;
@@ -1194,7 +1235,18 @@ class PostProvider extends ChangeNotifier {
         .doc(_uid)
         .collection('blocked')
         .doc(targetUid)
-        .set({'blockedAt': Timestamp.now()});
+        // blockedUid duplicates the document id on purpose. The "hide people
+        // who blocked me" lookup is a collectionGroup query, and those cannot
+        // filter on document ids — so without this field the reverse direction
+        // is not expressible, and firestore.rules keys its read allowance off
+        // it too. Legacy docs lacking it need the backfill script.
+        .set({'blockedAt': Timestamp.now(), 'blockedUid': targetUid});
+    // Apply immediately. The feed is a live snapshot listener, but blocking
+    // changes no post document, so nothing would re-emit — without this the
+    // user keeps seeing the person they just blocked until the next cold
+    // start, which is precisely the bug the snackbar was lying about.
+    _blockedUids = {..._blockedUids, targetUid};
+    _feed = withoutBlocked(_feed, _blockedUids, (p) => p.authorId);
     notifyListeners();
   }
 
@@ -1207,6 +1259,9 @@ class PostProvider extends ChangeNotifier {
         .collection('blocked')
         .doc(targetUid)
         .delete();
+    _blockedUids = {..._blockedUids}..remove(targetUid);
+    // Their posts don't reappear until the feed re-queries; unblocking is not
+    // urgent the way blocking is, so we don't force a resubscribe here.
     notifyListeners();
   }
 
@@ -1887,10 +1942,26 @@ class MatchProvider extends ChangeNotifier {
     final airlines = List<String>.from(prefs['airlines'] ?? const <String>[]);
     final positions = List<String>.from(prefs['positions'] ?? const <String>[]);
 
+    // Blocking must remove someone from the match deck in both directions:
+    // being shown a person you blocked is bad, and being shown to someone who
+    // blocked you is worse. A failure here aborts the load rather than
+    // presenting an unfiltered deck — a swipe is an irreversible social action,
+    // so an empty deck is the better error.
+    final Set<String> blocked;
+    try {
+      blocked = await fetchBlockedUids(_db, _uid!);
+    } catch (_) {
+      _candidates = [];
+      _loading = false;
+      notifyListeners();
+      return;
+    }
+
     final snap = await _db.collection('users').where('role', isEqualTo: 'user').limit(50).get();
     _candidates = snap.docs
         .map((d) => UserModel.fromFirestore(d))
         .where((u) => u.uid != _uid)
+        .where((u) => !blocked.contains(u.uid))
         .where((u) => !verifiedOnly || u.isVerified)
         .where((u) => !sameAirline || (myAirline != null && u.airline == myAirline))
         .where((u) => airlines.isEmpty || (u.airline != null && airlines.contains(u.airline)))

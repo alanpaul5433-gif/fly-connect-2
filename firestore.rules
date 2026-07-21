@@ -94,7 +94,25 @@ service cloud.firestore {
         allow delete: if isOwner(followerId) || isOwner(userId);
       }
       match /blocked/{blockedId} {
-        allow read, write: if isOwner(userId);
+        // The owner sees and edits their own block list, as before.
+        //
+        // The second clause lets you read a doc that blocks YOU, which is what
+        // makes the "hide users who blocked me" filter possible: clients run
+        //   collectionGroup('blocked').where('blockedUid', '==', myUid)
+        // and Firestore admits it because that constraint proves every matched
+        // doc satisfies this rule. It has to key off the blockedUid FIELD, not
+        // blockedId — collection group queries cannot filter on document ids
+        // (documentId() there compares full paths), so the id alone is not
+        // something a query can constrain on.
+        //
+        // This deliberately reveals "X blocked me" to the blocked user. It does
+        // not reveal the rest of X's list: a doc keyed to a third party fails
+        // both clauses, and listing the collection directly stays owner-only.
+        allow read: if isOwner(userId)
+          || (isAuth() && resource.data.blockedUid == request.auth.uid);
+        // Writes stay owner-only — being blocked must not let you unblock
+        // yourself by deleting or overwriting the doc.
+        allow write: if isOwner(userId);
       }
       match /savedPosts/{postId} {
         // Only the user may see or modify their own bookmarks.
@@ -104,6 +122,20 @@ service cloud.firestore {
         allow read: if isAuth();
         allow write: if isOwner(userId);
       }
+    }
+
+    // ── "Who blocked me", across all users ─────────────────
+    // A collection group query is NOT covered by the nested
+    // /users/{userId}/blocked/{blockedId} rule above: collection group access
+    // is only granted by a rule written with a {path=**} prefix. Without this
+    // block the query fails "No matching allow statements" even though a
+    // direct get() on the very same document succeeds.
+    //
+    // Read-only and narrowly conditioned: you may see a block document only
+    // when it names you. Writes are deliberately absent here so the owner-only
+    // write rule above remains the single authority on modifying a block list.
+    match /{path=**}/blocked/{blockedId} {
+      allow read: if isAuth() && resource.data.blockedUid == request.auth.uid;
     }
 
     // ── Posts ──────────────────────────────────────────────

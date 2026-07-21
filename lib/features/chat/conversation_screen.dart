@@ -172,14 +172,19 @@ class _ConversationScreenState extends State<ConversationScreen> {
               _showReportSheet();
             },
           ),
-          if (!widget.isGroup)
+          // Only offered when we actually know who the other person is. The
+          // old `widget.otherUid ?? widget.chatId` fallback meant a chat opened
+          // without that param blocked the CHAT DOCUMENT ID as though it were a
+          // user: the write succeeded, the snackbar promised the user would see
+          // no more of their content, and nobody was blocked. Hiding the action
+          // is honest; a confirmation for something that didn't happen is not.
+          if (!widget.isGroup && widget.otherUid != null && widget.otherUid!.isNotEmpty)
             ListTile(
               leading: const Icon(Icons.block, color: Colors.red),
               title: const Text('Block user', style: TextStyle(color: Colors.red)),
               onTap: () async {
                 Navigator.pop(context);
-                final targetUid = widget.otherUid ?? widget.chatId;
-                await context.read<PostProvider>().blockUser(targetUid);
+                await context.read<PostProvider>().blockUser(widget.otherUid!);
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                     content: Text('User blocked. You will not see their content.'),
@@ -220,9 +225,15 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 title: Text(r),
                 onTap: () async {
                   Navigator.pop(context);
+                  // Report the user when we know who they are, otherwise report
+                  // the conversation. Previously the chat id was filed under
+                  // targetType 'user', so moderators received reports pointing
+                  // at a user that does not exist.
+                  final reportUser =
+                      !widget.isGroup && (widget.otherUid?.isNotEmpty ?? false);
                   await context.read<PostProvider>().reportContent(
-                        targetType: widget.isGroup ? 'chat' : 'user',
-                        targetId: widget.isGroup ? widget.chatId : (widget.otherUid ?? widget.chatId),
+                        targetType: reportUser ? 'user' : 'chat',
+                        targetId: reportUser ? widget.otherUid! : widget.chatId,
                         reason: r,
                       );
                   if (mounted) {

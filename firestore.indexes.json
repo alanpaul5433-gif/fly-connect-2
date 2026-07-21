@@ -107,5 +107,15 @@
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "comment": "Used by fetchBlockedUids — collectionGroup('blocked').where('blockedUid', '==', myUid), the 'who blocked me' half of block enforcement. A collection group query needs an index whose queryScope is COLLECTION_GROUP; the automatic single-field index only covers COLLECTION scope, so without this override the query fails in production with FAILED_PRECONDITION even though it passes against the emulator, which does not enforce indexes.",
+      "collectionGroup": "blocked",
+      "fieldPath": "blockedUid",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    }
+  ]
 }

@@ -101,8 +101,8 @@ Play has required in-app account deletion since May 2024; the App Store requires
 | H7 **[LIVE]** | `profile_screen.dart:745` | Profile header says **"47 Posts"** while the grid below says **"No posts yet"** — the grid filters the newest 25 *global* posts by `authorId` instead of querying the user's posts. |
 | H8 **[LIVE]** | `chat_screen.dart:245`, `conversation_screen.dart:273` | **Presence is fake.** A green "online" dot on every tile and a hardcoded `'Online'` in the header — shown even for a *group* chat. No presence data is read anywhere. |
 | H9 **[CODE]** | `trips_screen.dart` | `/passport/:userId` passes `userId` in, and `widget.userId` is **never referenced** (grep: 0 hits in 273 lines). Opening someone else's passport shows **your own trips**, titled "My Trips", with a live Add button and per-row Delete. |
-| H10 **[CODE]** | `real_providers.dart:1189` | `blockUser` writes `users/{me}/blocked/{uid}`, and **nothing reads it** — not the feed, not match candidates. User sees "You will not see their content"; their posts are still there on the next scroll. |
-| H11 **[CODE]** | `conversation_screen.dart:181`, `open_chat.dart:47` | Block falls back to `otherUid ?? chatId`, and `OpenChat.withUser` never passes `otherUid`. Blocking from a match/profile chat writes `blocked/{chatDocId}` — **a document id that is not a user**. Nothing is blocked. Report has the identical bug at `:225`. |
+| H10 ✅ **FIXED** | `real_providers.dart:1189` | `blockUser` writes `users/{me}/blocked/{uid}`, and **nothing reads it** — not the feed, not match candidates. User sees "You will not see their content"; their posts are still there on the next scroll. See below. |
+| H11 ✅ **FIXED** | `conversation_screen.dart:181`, `open_chat.dart:47` | Block falls back to `otherUid ?? chatId`, and `OpenChat.withUser` never passes `otherUid`. Blocking from a match/profile chat writes `blocked/{chatDocId}` — **a document id that is not a user**. Nothing is blocked. Report has the identical bug at `:225`. See below. |
 | H12 **[CODE]** | `home_screen.dart:198` | `_PostCard` is stateful with per-post state set once in `initState`, built **with no `key`**. The feed prepends new posts → like/save state and counts shift onto the wrong cards and never correct themselves. |
 | H13 **[CODE]** | `real_providers.dart:1101` | `deletePost` batches deletion of all comments + likes, but rules only allow their owners to delete them (`firestore.rules:118,124`). One denial fails the whole commit → **a post anyone else liked or commented on can never be deleted**. |
 | H14 **[CODE]** | `real_providers.dart:1851` | `loadCandidates` has no try/catch around two Firestore reads. Offline or `permission-denied` leaves `_loading` stuck true → **Match tab is a permanent spinner** with no error and no retry. |
@@ -137,6 +137,42 @@ The setting offered Everyone / Friends Only / Verified Users, but the rule was `
 **Coverage:** `functions/test/rules/safechecks.rules.test.ts` (14 tests) and `test/models/safe_check_model_test.dart` (5 tests). One test records a sharp edge worth knowing: an `array-contains` on `visibleTo` **alone** is denied — the query must pin `visibility == 'friends'` as well, or Firestore can't prove the branch.
 
 **Not covered by test:** the provider's multi-subscription merge. `SafeCheckProvider` hard-codes `FirebaseFirestore.instance`, the same DI limitation as elsewhere. The query *shapes* it issues are covered by the rules tests; the merge/dedupe logic is not.
+
+### H10 / H11. Blocking that didn't block — ✅ FIXED 2026-07-21 (three defects, not one)
+`firestore.rules` (blocked), `block_list.dart`, `PostProvider`, `MatchProvider`, `nearby_users_screen.dart`, `open_chat.dart`, `conversation_screen.dart`, `ChatModel`
+
+Blocking wrote a document, showed "You will not see their content", and changed nothing. Investigating it surfaced two further defects underneath the reported one.
+
+**1. Nothing consumed the block list (H10).** The feed and match candidates never read `users/{me}/blocked`. Profile and Nearby did, so this wasn't total — but the feed is where a blocked person is actually seen.
+
+**2. The reverse direction was structurally impossible, not just denied.** Nearby *tried* to hide users who had blocked *me*:
+
+```dart
+collectionGroup('blocked').where(FieldPath.documentId, isEqualTo: myUid)   // throws
+```
+
+On a collection group query `documentId()` is compared against a **full document path**, so a bare uid raises `FirebaseError: ... 'victim' is not [a valid path] because it has an odd number of segments`. It threw on every call, and `catch (_) {/* fail open */}` turned that into "show everyone". No rules change alone could have fixed it: the blocked uid existed only as the **document id**, and collection group queries cannot filter on ids. The uid had to become a field first.
+
+**3. Block/Report targeted a chat id (H11).** `OpenChat.withUser` had `otherUid` in hand and never put it in the route, so `conversation_screen`'s `otherUid ?? chatId` fallback wrote `blocked/{chatDocId}` and filed reports of `targetType: 'user'` pointing at a non-existent user.
+
+**Fix applied:**
+- `blockUser` now denormalises `blockedUid` alongside the document id, which is what makes the reverse lookup expressible at all.
+- `firestore.rules` gained a second read clause plus a **`match /{path=**}/blocked/{blockedId}`** block. The wildcard is required: a nested path rule does **not** grant collection group access, so the query failed `No matching allow statements` even though a direct `get()` on the same document succeeded. Reads are admitted only for a doc that names you; the rest of the list stays private and **writes stay owner-only**, so being blocked grants no power to unblock yourself.
+- New `lib/shared/utils/block_list.dart` — `fetchBlockedUids` (union of both directions, self-block removed) and `withoutBlocked`. Takes `db` as a parameter, the `account_deletion.dart` pattern, because the providers hard-code `FirebaseFirestore.instance`.
+- Feed filters on every snapshot; `blockUser` also filters in place and notifies, since blocking mutates no post document and the live listener would otherwise not re-emit until a cold start. `_feedHasMore` is now measured on the **raw** page, not the filtered list, or pagination would stall.
+- Match candidates filter both directions. Nearby's two swallowed reads became one call whose failure is recorded.
+- `ChatModel.otherUidFor` replaces the bare `firstWhere` in the chat list — the same trap as B1's second bug, but here the wrong answer would **block or report an uninvolved third party**. Returns null for groups, non-participants and self-DMs.
+- Block/Report are hidden when the other party is unknown, rather than acting on a wrong id.
+
+**Failure policy — this is a reversal.** These paths previously failed *open*. They now fail *closed*: an unreadable block list means the feed shows an error, the match deck comes back empty, and Nearby refuses to render. Showing someone the exact person they blocked is worse than showing them an error, and a swipe is an irreversible social action. The one deliberate exception is a transient failure *after* a successful load, which keeps the last known set rather than discarding it.
+
+**Coverage:** `functions/test/rules/blocked.rules.test.ts` (13 tests) and `test/shared/block_list_test.dart` (13 tests), plus 6 new `ChatModel.otherUidFor` tests. RED was watched first and earned its keep — it produced the `documentId()` error that redirected the whole approach.
+
+**Backfill:** `scripts/backfill-blocked-uid.js` (`--dry-run` first). Unlike B2 this is **not** a deploy prerequisite — the new rule only grants reads, so ordering can't break anything. Until it runs, old blocks stay half-enforced: filtered from the blocker's own view (by document id), not yet from the reverse direction. A rules test pins that legacy docs stay unreadable meanwhile, so the gap under-hides rather than exposing anything.
+
+**Index:** a `COLLECTION_GROUP`-scoped single-field override on `blocked.blockedUid`. The automatic single-field index only covers `COLLECTION` scope, and the emulator does not enforce indexes — so without it this passes every test here and fails with `FAILED_PRECONDITION` in production.
+
+**Not covered by test:** the provider wiring itself (feed filtering, match filtering, Nearby) — same DI limitation. The extracted logic and the rules are tested; the call sites are verified by reading.
 
 ## Missing components
 

@@ -12,6 +12,7 @@ import '../../shared/widgets/shared_widgets.dart';
 import '../../shared/widgets/inline_error_banner.dart';
 import '../../shared/models/models.dart';
 import '../../shared/providers/real_providers.dart';
+import '../../shared/utils/block_list.dart';
 import '../../shared/mock/mock_data.dart' show mockMyLocation;
 import '../../shared/utils/open_chat.dart';
 
@@ -145,31 +146,41 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
     // Safety: do NOT show users I have blocked, AND do NOT show users
     // who have blocked me. Either direction means we shouldn't surface
     // each other on the map (stalking / harassment mitigation).
-    final blockedByMe = <String>{};
-    final blockedMe = <String>{};
+    final blocked = <String>{};
+    var blockedLoadFailed = false;
     final myFollowing = <String>{};
     final iAmVerified = auth.currentUser?.isVerified ?? false;
     if (myUid != null) {
       try {
-        final mineSnap = await FirebaseFirestore.instance
-            .collection('users').doc(myUid)
-            .collection('blocked').get();
-        blockedByMe.addAll(mineSnap.docs.map((d) => d.id));
-      } catch (_) {/* fail open */}
-      try {
-        final theirsSnap = await FirebaseFirestore.instance
-            .collectionGroup('blocked')
-            .where(FieldPath.documentId, isEqualTo: myUid)
-            .get();
-        blockedMe.addAll(theirsSnap.docs.map((d) =>
-            d.reference.parent.parent?.id ?? '').where((s) => s.isNotEmpty));
-      } catch (_) {/* fail open */}
+        blocked.addAll(await fetchBlockedUids(FirebaseFirestore.instance, myUid));
+      } catch (_) {
+        // Previously two separate reads that each swallowed their error and
+        // carried on. The reverse-direction one could not have succeeded at
+        // all: it filtered a collectionGroup by FieldPath.documentId, which
+        // compares full paths there, so it threw on every call and "users who
+        // blocked me" was never actually hidden.
+        //
+        // Now a failure is recorded instead of ignored. Nearby shows people a
+        // map position, so rendering it with an unknown block list is the one
+        // outcome worth refusing.
+        blockedLoadFailed = true;
+      }
       try {
         final followingSnap = await FirebaseFirestore.instance
             .collection('users').doc(myUid)
             .collection('following').get();
         myFollowing.addAll(followingSnap.docs.map((d) => d.id));
       } catch (_) {/* fail open */}
+    }
+
+    if (blockedLoadFailed) {
+      if (mounted) {
+        setState(() {
+          _loadingUsers = false;
+          _loadError = 'Could not load Nearby right now. Please try again.';
+        });
+      }
+      return;
     }
 
     try {
@@ -180,8 +191,7 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
       final users = <_NearbyUser>[];
       for (final doc in snap.docs) {
         if (doc.id == myUid) continue;
-        if (blockedByMe.contains(doc.id)) continue;
-        if (blockedMe.contains(doc.id)) continue;
+        if (blocked.contains(doc.id)) continue;
         if (users.length >= 10) break;
         final d = doc.data();
         final settings = d['settings'] as Map<String, dynamic>? ?? {};

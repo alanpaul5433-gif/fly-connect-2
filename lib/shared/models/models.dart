@@ -268,16 +268,28 @@ class ChatModel {
     if (otherName != null && otherName.trim().isNotEmpty) otherUid: otherName.trim(),
   };
 
+  /// The person on the other side of this DM, as seen by [uid], or null when
+  /// there isn't exactly one well-defined answer: a group, a viewer who isn't
+  /// a participant, or a self-DM.
+  ///
+  /// Returning null rather than guessing matters because callers feed this to
+  /// blockUser and reportContent. A plain
+  /// `participants.firstWhere((p) => p != uid)` silently yields
+  /// participants.first when [uid] is absent, which would block or report an
+  /// uninvolved third party.
+  String? otherUidFor(String uid) {
+    if (type == 'group') return null;
+    if (!participants.contains(uid)) return null;
+    final others = participants.where((p) => p != uid);
+    return others.isEmpty ? null : others.first;
+  }
+
   /// Title for this chat as seen by [uid]: the group name for a group, the
   /// other participant's name for a DM.
   String displayNameFor(String uid) {
     if (type == 'group') return groupName ?? 'Group';
-    // Only resolve "the other participant" when the viewer is actually one of
-    // them. Otherwise firstWhere returns participants.first — which is the
-    // viewer's own row in the common case — and we'd label the DM with the
-    // wrong person's name rather than admitting we don't know.
-    if (!participants.contains(uid)) return 'User';
-    final otherUid = participants.firstWhere((p) => p != uid, orElse: () => '');
+    final otherUid = otherUidFor(uid);
+    if (otherUid == null) return 'User';
     final name = participantNames[otherUid];
     if (name != null && name.isNotEmpty) return name;
     return groupName ?? 'User';

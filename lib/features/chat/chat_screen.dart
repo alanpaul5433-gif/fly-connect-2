@@ -228,9 +228,7 @@ class _ChatTile extends StatelessWidget {
     final unread = chat.unreadCount[currentUid] ?? 0;
     final isGroup = chat.type == 'group';
     final name = chat.displayNameFor(currentUid);
-    final otherUid = isGroup
-        ? null
-        : chat.participants.firstWhere((p) => p != currentUid, orElse: () => '');
+    final otherUid = chat.otherUidFor(currentUid);
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),

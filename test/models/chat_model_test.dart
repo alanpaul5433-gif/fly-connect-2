@@ -139,4 +139,54 @@ void main() {
       expect(chat.displayNameFor('me'), 'Group');
     });
   });
+
+  group('ChatModel.otherUidFor', () {
+    /// H11. The chat list derived the other participant with a bare
+    /// `firstWhere((p) => p != currentUid)`, which returns participants.first
+    /// when the viewer isn't in the list — the same trap that made every DM
+    /// title render the viewer's own name (B1). Here the stakes are higher:
+    /// the value is passed to blockUser and reportContent, so a wrong answer
+    /// blocks or reports an innocent third party.
+    ChatModel dm(List<String> participants) => ChatModel(
+          id: 'c1',
+          type: 'dm',
+          participants: participants,
+          createdBy: participants.isEmpty ? 'me' : participants.first,
+          createdAt: DateTime(2026, 1, 1),
+        );
+
+    test('returns the other participant of a DM', () {
+      expect(dm(['me', 'them']).otherUidFor('me'), 'them');
+    });
+
+    test('is symmetric — works from either side', () {
+      expect(dm(['me', 'them']).otherUidFor('them'), 'me');
+    });
+
+    test('returns null when the viewer is not a participant', () {
+      // Must NOT return 'alice', who is simply first in the list.
+      expect(dm(['alice', 'bob']).otherUidFor('eve'), isNull);
+    });
+
+    test('returns null for a group chat', () {
+      final group = ChatModel(
+        id: 'g1',
+        type: 'group',
+        participants: const ['me', 'them', 'other'],
+        createdBy: 'me',
+        createdAt: DateTime(2026, 1, 1),
+      );
+      expect(group.otherUidFor('me'), isNull);
+    });
+
+    test('returns null for a self-DM rather than the viewer themselves', () {
+      // Blocking yourself would erase your own content from your feed.
+      expect(dm(['me']).otherUidFor('me'), isNull);
+      expect(dm(['me', 'me']).otherUidFor('me'), isNull);
+    });
+
+    test('returns null when participants is empty', () {
+      expect(dm(const []).otherUidFor('me'), isNull);
+    });
+  });
 }
