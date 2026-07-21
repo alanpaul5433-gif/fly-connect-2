@@ -1929,9 +1929,14 @@ class MatchProvider extends ChangeNotifier {
   List<UserModel> _candidates = [];
   final List<MatchModel> _matches = [];
   bool _loading = false;
+  String? _error;
   AuthProvider? _storedAuth;
 
   bool get loading => _loading;
+  /// Non-null when the last loadCandidates failed. H14: two unguarded reads
+  /// meant an offline/permission-denied error left _loading stuck true and the
+  /// Match tab spun forever with no error and no retry.
+  String? get error => _error;
   List<UserModel> get candidates => _candidates;
   List<MatchModel> get matches => _matches;
   String? get _uid => isMock ? (_storedAuth?.currentUser?.uid ?? 'user_001') : _auth.currentUser?.uid;
@@ -1947,47 +1952,50 @@ class MatchProvider extends ChangeNotifier {
   Future<void> loadCandidates() async {
     if (isMock) { _candidates = List.from(mockUsers); notifyListeners(); return; }
     if (_uid == null) return;
-    _loading = true; notifyListeners();
+    _loading = true; _error = null; notifyListeners();
 
-    // Honor the filters set on the Match Preferences screen
-    // (users/{uid}.matchPrefs). Age/distance are persisted there too but can't
-    // be applied yet — UserModel carries no DOB or geo — so those stay a
-    // follow-up once that data exists. We over-fetch (50) since filtering thins
-    // the pool client-side.
-    final meDoc = await _db.collection('users').doc(_uid).get();
-    final me = meDoc.data() ?? const <String, dynamic>{};
-    final prefs = (me['matchPrefs'] as Map<String, dynamic>?) ?? const {};
-    final myAirline = me['airline'] as String?;
-    final verifiedOnly = prefs['verifiedOnly'] == true;
-    final sameAirline = prefs['sameAirline'] == true;
-    final airlines = List<String>.from(prefs['airlines'] ?? const <String>[]);
-    final positions = List<String>.from(prefs['positions'] ?? const <String>[]);
-
-    // Blocking must remove someone from the match deck in both directions:
-    // being shown a person you blocked is bad, and being shown to someone who
-    // blocked you is worse. A failure here aborts the load rather than
-    // presenting an unfiltered deck — a swipe is an irreversible social action,
-    // so an empty deck is the better error.
-    final Set<String> blocked;
+    // H14: every read below is inside this try. Previously the profile fetch
+    // and the candidate query were unguarded, so offline / permission-denied
+    // threw straight past `_loading = false` and the tab spun forever.
     try {
-      blocked = await fetchBlockedUids(_db, _uid!);
+      // Honor the filters set on the Match Preferences screen
+      // (users/{uid}.matchPrefs). Age/distance are persisted there too but
+      // can't be applied yet — UserModel carries no DOB or geo — so those stay
+      // a follow-up once that data exists. We over-fetch (50) since filtering
+      // thins the pool client-side.
+      final meDoc = await _db.collection('users').doc(_uid).get();
+      final me = meDoc.data() ?? const <String, dynamic>{};
+      final prefs = (me['matchPrefs'] as Map<String, dynamic>?) ?? const {};
+      final myAirline = me['airline'] as String?;
+      final verifiedOnly = prefs['verifiedOnly'] == true;
+      final sameAirline = prefs['sameAirline'] == true;
+      final airlines = List<String>.from(prefs['airlines'] ?? const <String>[]);
+      final positions = List<String>.from(prefs['positions'] ?? const <String>[]);
+
+      // Blocking removes someone from the deck in both directions; acting on
+      // someone (like/pass/match) removes them too, so passed profiles don't
+      // come straight back (H15). Both reads are required for a correct deck,
+      // so a failure surfaces as an error rather than an unfiltered deck — a
+      // swipe is an irreversible social action.
+      final blocked = await fetchBlockedUids(_db, _uid!);
+      final actedOn = await fetchActedOnUids(_db, _uid!);
+
+      final snap = await _db.collection('users')
+          .where('role', isEqualTo: 'user').limit(50).get();
+      _candidates = snap.docs
+          .map((d) => UserModel.fromFirestore(d))
+          .where((u) => u.uid != _uid)
+          .where((u) => !blocked.contains(u.uid))
+          .where((u) => !actedOn.contains(u.uid))
+          .where((u) => !verifiedOnly || u.isVerified)
+          .where((u) => !sameAirline || (myAirline != null && u.airline == myAirline))
+          .where((u) => airlines.isEmpty || (u.airline != null && airlines.contains(u.airline)))
+          .where((u) => positions.isEmpty || (u.position != null && positions.contains(u.position)))
+          .toList();
     } catch (_) {
       _candidates = [];
-      _loading = false;
-      notifyListeners();
-      return;
+      _error = 'Could not load matches. Please try again.';
     }
-
-    final snap = await _db.collection('users').where('role', isEqualTo: 'user').limit(50).get();
-    _candidates = snap.docs
-        .map((d) => UserModel.fromFirestore(d))
-        .where((u) => u.uid != _uid)
-        .where((u) => !blocked.contains(u.uid))
-        .where((u) => !verifiedOnly || u.isVerified)
-        .where((u) => !sameAirline || (myAirline != null && u.airline == myAirline))
-        .where((u) => airlines.isEmpty || (u.airline != null && airlines.contains(u.airline)))
-        .where((u) => positions.isEmpty || (u.position != null && positions.contains(u.position)))
-        .toList();
     _loading = false; notifyListeners();
   }
 
@@ -2036,10 +2044,9 @@ class MatchProvider extends ChangeNotifier {
     _candidates.removeWhere((u) => u.uid == targetUid);
     if (isMock) { notifyListeners(); return; }
     if (_uid == null) return;
-    await _db.collection('matches').add({
-      'userA': _uid, 'userB': targetUid, 'status': 'passed',
-      'matchType': 'none', 'likedAt': FieldValue.serverTimestamp(),
-    });
+    // H15: idempotent write keyed on the (me, target) pair. The old add()
+    // created a fresh doc on every pass.
+    await recordPass(_db, myUid: _uid!, targetUid: targetUid);
     notifyListeners();
   }
 }

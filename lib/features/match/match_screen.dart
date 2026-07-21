@@ -106,6 +106,11 @@ class _MatchScreenState extends State<MatchScreen> with SingleTickerProviderStat
             if (provider.loading) {
               cards = const Center(
                 child: CircularProgressIndicator(color: AppColors.primary));
+            } else if (provider.error != null) {
+              // H14: an error used to leave the tab spinning forever.
+              cards = _MatchError(
+                message: provider.error!,
+                onRetry: () => provider.loadCandidates());
             } else if (provider.candidates.isEmpty) {
               cards = _NoMoreCards(onRefresh: () => provider.loadCandidates());
             } else {
@@ -348,6 +353,28 @@ class _MatchBanner extends StatelessWidget {
           onPressed: onMessage),
       ]));
   }
+}
+
+class _MatchError extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _MatchError({required this.message, required this.onRetry});
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(32),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        const Icon(Icons.error_outline, size: 56, color: AppColors.textSecondary),
+        const SizedBox(height: 16),
+        Text(message, textAlign: TextAlign.center,
+          style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary)),
+        const SizedBox(height: 24),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: AppColors.dark,
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100))),
+          onPressed: onRetry, child: const Text('Retry', style: TextStyle(fontWeight: FontWeight.bold))),
+      ])));
 }
 
 class _NoMoreCards extends StatelessWidget {

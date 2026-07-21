@@ -101,4 +101,86 @@ void main() {
           isFalse);
     });
   });
+
+  group('recordLike — idempotency (H15)', () {
+    test('liking the same person twice leaves a single pending edge', () async {
+      await recordLike(db, myUid: me, targetUid: them, matchType: 'buddy');
+      await recordLike(db, myUid: me, targetUid: them, matchType: 'buddy');
+      expect(await matchCount(), 1);
+    });
+
+    test('a like then a pass of the same person do not both persist', () async {
+      // The old passUser add()ed a fresh doc every time, so a like followed
+      // by a pass left two contradictory edges. One outgoing edge per pair.
+      await recordLike(db, myUid: me, targetUid: them, matchType: 'buddy');
+      await recordPass(db, myUid: me, targetUid: them);
+      expect(await matchCount(), 1);
+      final doc = (await db.collection('matches').get()).docs.first;
+      expect(doc.data()['status'], 'passed');
+    });
+  });
+
+  group('recordPass', () {
+    test('writes a single passed edge', () async {
+      await recordPass(db, myUid: me, targetUid: them);
+      final docs = (await db.collection('matches').get()).docs;
+      expect(docs, hasLength(1));
+      expect(docs.first.data()['status'], 'passed');
+      expect(docs.first.data()['userA'], me);
+      expect(docs.first.data()['userB'], them);
+    });
+
+    test('passing twice does not duplicate', () async {
+      await recordPass(db, myUid: me, targetUid: them);
+      await recordPass(db, myUid: me, targetUid: them);
+      expect(await matchCount(), 1);
+    });
+  });
+
+  group('fetchActedOnUids (H15)', () {
+    test('is empty with no history', () async {
+      expect(await fetchActedOnUids(db, me), isEmpty);
+    });
+
+    test('includes someone I passed', () async {
+      await recordPass(db, myUid: me, targetUid: them);
+      expect(await fetchActedOnUids(db, me), contains(them));
+    });
+
+    test('includes someone I liked (pending)', () async {
+      await recordLike(db, myUid: me, targetUid: them, matchType: 'buddy');
+      expect(await fetchActedOnUids(db, me), contains(them));
+    });
+
+    test('includes someone I matched with via their incoming doc', () async {
+      // The subtle case: they liked me first (their doc, userA=them), I liked
+      // back, which PROMOTES their doc to matched. My own uid never appears as
+      // userA there, so a naive `where userA == me` scan would miss them and
+      // they would resurface in my deck after a reload.
+      await db.collection('matches').add({
+        'userA': them, 'userB': me, 'status': 'pending',
+        'matchType': 'buddy', 'likedAt': DateTime(2026, 7, 1),
+      });
+      await recordLike(db, myUid: me, targetUid: them, matchType: 'buddy');
+      expect(await fetchActedOnUids(db, me), contains(them));
+    });
+
+    test('does NOT include someone whose like of me is still pending', () async {
+      // They liked me but I have not reciprocated. They must stay in my deck
+      // so I can match back — excluding them would make matching impossible.
+      await db.collection('matches').add({
+        'userA': them, 'userB': me, 'status': 'pending',
+        'matchType': 'buddy', 'likedAt': DateTime(2026, 7, 1),
+      });
+      expect(await fetchActedOnUids(db, me), isNot(contains(them)));
+    });
+
+    test('ignores edges between other people', () async {
+      await db.collection('matches').add({
+        'userA': 'a', 'userB': 'b', 'status': 'passed',
+        'matchType': 'none', 'likedAt': DateTime(2026, 7, 1),
+      });
+      expect(await fetchActedOnUids(db, me), isEmpty);
+    });
+  });
 }
