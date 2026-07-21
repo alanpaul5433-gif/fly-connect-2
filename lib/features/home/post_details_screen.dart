@@ -92,7 +92,7 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
   Future<void> _toggleLike() async {
     final provider = context.read<PostProvider>();
     setState(() { _isLiked = !_isLiked; _likeCount += _isLiked ? 1 : -1; });
-    if (_isLiked) { await provider.likePost(widget.post.id); }
+    if (_isLiked) { await provider.likePost(widget.post.id, postAuthorId: widget.post.authorId); }
     else { await provider.unlikePost(widget.post.id); }
   }
 
@@ -100,7 +100,8 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
     final text = _ctrl.text.trim();
     if (text.isEmpty) return;
     _ctrl.clear();
-    await context.read<PostProvider>().addComment(widget.post.id, text);
+    await context.read<PostProvider>().addComment(widget.post.id, text,
+        postAuthorId: widget.post.authorId);
   }
 
   @override

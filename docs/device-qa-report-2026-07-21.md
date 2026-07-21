@@ -104,9 +104,9 @@ Play has required in-app account deletion since May 2024; the App Store requires
 | H10 ✅ **FIXED** | `real_providers.dart:1189` | `blockUser` writes `users/{me}/blocked/{uid}`, and **nothing reads it** — not the feed, not match candidates. User sees "You will not see their content"; their posts are still there on the next scroll. See below. |
 | H11 ✅ **FIXED** | `conversation_screen.dart:181`, `open_chat.dart:47` | Block falls back to `otherUid ?? chatId`, and `OpenChat.withUser` never passes `otherUid`. Blocking from a match/profile chat writes `blocked/{chatDocId}` — **a document id that is not a user**. Nothing is blocked. Report has the identical bug at `:225`. See below. |
 | H12 **[CODE]** | `home_screen.dart:198` | `_PostCard` is stateful with per-post state set once in `initState`, built **with no `key`**. The feed prepends new posts → like/save state and counts shift onto the wrong cards and never correct themselves. |
-| H13 **[CODE]** | `real_providers.dart:1101` | `deletePost` batches deletion of all comments + likes, but rules only allow their owners to delete them (`firestore.rules:118,124`). One denial fails the whole commit → **a post anyone else liked or commented on can never be deleted**. |
-| H14 **[CODE]** | `real_providers.dart:1851` | `loadCandidates` has no try/catch around two Firestore reads. Offline or `permission-denied` leaves `_loading` stuck true → **Match tab is a permanent spinner** with no error and no retry. |
-| H15 **[CODE]** | `real_providers.dart:1870` | Candidate query excludes neither already-matched/passed users nor blocked users. **Passed profiles come straight back**, and `passUser` `add()`s a fresh doc per pass (duplicate rows forever). |
+| H13 ✅ **FIXED** | `real_providers.dart:1101` | `deletePost` batches deletion of all comments + likes, but rules only allow their owners to delete them (`firestore.rules:118,124`). One denial fails the whole commit → **a post anyone else liked or commented on can never be deleted**. See below. |
+| H14 ✅ **FIXED** | `real_providers.dart:1851` | `loadCandidates` has no try/catch around two Firestore reads. Offline or `permission-denied` leaves `_loading` stuck true → **Match tab is a permanent spinner** with no error and no retry. See below. |
+| H15 ✅ **FIXED** | `real_providers.dart:1870` | Candidate query excludes neither already-matched/passed users nor blocked users. **Passed profiles come straight back**, and `passUser` `add()`s a fresh doc per pass (duplicate rows forever). See below. |
 | H16 **[CODE]** | `settings_screen.dart:130-141` | All six push toggles are persisted to `users/{uid}.settings` and **read by nobody** — not by any Dart file, not by `functions/src/pushFanout.ts`. Turning off "Messages" changes nothing. |
 | H17 **[CODE]** | `nearby_users_screen.dart:135` | Location privacy reads `AuthProvider.currentUser.settings`, but Settings writes via `UserProvider.updateProfile`. `AuthProvider` never refreshes → **turning off location sharing has no effect until app restart**; coordinates keep uploading. |
 | H18 ✅ **FIXED** | `firestore.rules:296` | SafeCheck Visibility (Friends / Verified only) was **client-side only**. `safeChecks` was `allow read: if isAuth()` — any signed-in user could read every check-in's status, message, city and lat/lng. See below. |
@@ -173,6 +173,30 @@ On a collection group query `documentId()` is compared against a **full document
 **Index:** a `COLLECTION_GROUP`-scoped single-field override on `blocked.blockedUid`. The automatic single-field index only covers `COLLECTION` scope, and the emulator does not enforce indexes — so without it this passes every test here and fails with `FAILED_PRECONDITION` in production.
 
 **Not covered by test:** the provider wiring itself (feed filtering, match filtering, Nearby) — same DI limitation. The extracted logic and the rules are tested; the call sites are verified by reading.
+
+### H14 / H15. Match deck: stuck spinner, and profiles that come back — ✅ FIXED 2026-07-21
+`MatchProvider`, `match_logic.dart`, `match_screen.dart`
+
+**H14** — `loadCandidates` read the user profile and the candidate list with no `try/catch` (only the blocked-list read, added for H10, was guarded). Offline or `permission-denied` threw straight past `_loading = false`, so the tab spun forever. All reads are now in one `try`; a new `error` getter surfaces the failure and the screen shows a retry (`_MatchError`) instead of an endless spinner.
+
+**H15** — the candidate query excluded nobody you'd already acted on, so passed profiles returned on the next load, and `passUser` `add()`ed a fresh doc every pass.
+- `recordLike` / `recordPass` write with a **deterministic edge id** (`${me}__${them}`) — one outgoing edge per pair, so re-liking / re-passing / like-then-pass overwrites instead of duplicating.
+- `fetchActedOnUids` unions two directions. The second is the subtle one: a match completed via the *other* person's doc has *them* as `userA`, so a naive `userA == me` scan misses it and the matched person resurfaces after a reload. Someone whose like of me is still `pending` is deliberately kept in the deck so I can match back.
+
+Both new queries are equality-only with no `orderBy`, so no composite index is needed. **Coverage:** 11 new `match_logic` tests (idempotency, `recordPass`, `fetchActedOnUids`). Provider wiring itself untested — same DI limitation.
+
+### H13. A post with others' engagement could never be deleted — ✅ FIXED 2026-07-21
+`firestore.rules` (likes, comments), `PostProvider`, like/comment write paths
+
+`deletePost` built one atomic batch deleting every comment and like, then the post. But `likes/{userId}` was `allow write: if isOwner(userId)` and comments delete-only-by-author — so the instant *another* user engaged, their doc was denied and Firestore failed the **whole batch atomically**. The author's own post became undeletable. This is the write-side twin of the B2/H7 "one denied doc fails the whole operation" rule.
+
+**Fix (denormalised, no `get()`):**
+- Each like/comment now carries `postAuthorId`, written at engagement time. The delete rule admits `isOwner(userId) || request.auth.uid == resource.data.postAuthorId || isAdmin()`. `get()` was avoided deliberately — a cascade batch would blow past Firestore's **20-document-access ceiling** for multi-doc operations, so the `get()`-per-delete approach would itself fail on a popular post.
+- `deletePost` chunks the cascade at 400 writes/batch (< the 500 cap), fixing a second latent bug the report noted: a viral post's engagement would overflow a single batch. The post doc is deleted **last**, so a mid-cascade failure leaves a retryable post rather than orphans under a vanished parent.
+
+**Backfill:** `scripts/backfill-engagement-post-author.js` (`--dry-run` first) sets `postAuthorId` on pre-existing likes/comments from their parent post's author. **Not** a deploy prerequisite — the rule only grants delete power, so ordering breaks nothing; until it runs, deleting a post with *old* foreign engagement still fails, exactly the original bug for legacy data. Orphaned engagement (post already gone) is left as-is and reported.
+
+**Coverage:** `functions/test/rules/post-deletion.rules.test.ts` (8 tests) — author can delete others' engagement on their own post; owners keep their own delete power; a stranger cannot; being a liker grants nothing over third-party likes. Client wiring verified by reading (DI limitation).
 
 ## Missing components
 

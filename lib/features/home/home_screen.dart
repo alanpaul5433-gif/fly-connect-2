@@ -583,7 +583,7 @@ class _PostCardState extends State<_PostCard> {
     setState(() { _liked = !_liked; _likeCount += _liked ? 1 : -1; });
     try {
       if (_liked) {
-        await provider.likePost(widget.post.id);
+        await provider.likePost(widget.post.id, postAuthorId: widget.post.authorId);
       } else {
         await provider.unlikePost(widget.post.id);
       }

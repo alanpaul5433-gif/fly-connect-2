@@ -946,7 +946,7 @@ class PostProvider extends ChangeNotifier {
     // _feedLoadingMore flips back to false in the snapshot callback above.
   }
 
-  Future<void> likePost(String postId) async {
+  Future<void> likePost(String postId, {required String postAuthorId}) async {
     _liked.add(postId);
     if (isMock) {
       final i = _feed.indexWhere((p) => p.id == postId);
@@ -960,7 +960,10 @@ class PostProvider extends ChangeNotifier {
       notifyListeners(); return;
     }
     if (_uid == null) return;
-    await _db.collection('posts').doc(postId).collection('likes').doc(_uid).set({'likedAt': Timestamp.now()});
+    // postAuthorId is denormalised so the post's author can delete this like
+    // when they delete the post — see the likes rule in firestore.rules (H13).
+    await _db.collection('posts').doc(postId).collection('likes').doc(_uid)
+        .set({'likedAt': Timestamp.now(), 'postAuthorId': postAuthorId});
     await _db.collection('posts').doc(postId).update({'likeCount': FieldValue.increment(1)});
     // No notifyListeners(): the card toggles optimistically and the feed
     // snapshot reflects the new likeCount on its own. Notifying here would
@@ -1101,13 +1104,17 @@ class PostProvider extends ChangeNotifier {
         .map((s) => s.docs.map((d) => CommentModel.fromFirestore(d)).toList());
   }
 
-  Future<void> addComment(String postId, String text) async {
+  Future<void> addComment(String postId, String text,
+      {required String postAuthorId}) async {
     if (isMock) return;
     if (_uid == null) return;
     final user = _auth.currentUser!;
     final ref = _db.collection('posts').doc(postId).collection('comments').doc();
     await ref.set({
-      'postId': postId, 'authorId': _uid, 'authorName': user.displayName ?? 'User',
+      // postAuthorId denormalised so the post author can delete this comment
+      // when they delete the post (H13, see firestore.rules).
+      'postId': postId, 'authorId': _uid, 'postAuthorId': postAuthorId,
+      'authorName': user.displayName ?? 'User',
       'text': text, 'likeCount': 0, 'createdAt': FieldValue.serverTimestamp(),
     });
     await _db.collection('posts').doc(postId).update({'commentCount': FieldValue.increment(1)});
@@ -1162,17 +1169,29 @@ class PostProvider extends ChangeNotifier {
     if (_uid == null) return;
     final postRef = _db.collection('posts').doc(postId);
 
-    final batch = _db.batch();
+    // H13: likes/comments carry a denormalised postAuthorId, so firestore.rules
+    // now lets the post's author delete engagement they don't own — the batch
+    // no longer fails the moment someone else liked or commented.
+    //
+    // Chunked at 400 (< Firestore's 500-write batch cap) so a viral post with
+    // hundreds of likes/comments doesn't overflow a single batch and throw.
     final comments = await postRef.collection('comments').get();
-    for (final d in comments.docs) {
-      batch.delete(d.reference);
-    }
     final likes = await postRef.collection('likes').get();
-    for (final d in likes.docs) {
-      batch.delete(d.reference);
+    final refs = [
+      ...comments.docs.map((d) => d.reference),
+      ...likes.docs.map((d) => d.reference),
+    ];
+    for (var i = 0; i < refs.length; i += 400) {
+      final batch = _db.batch();
+      for (final ref in refs.sublist(i, min(i + 400, refs.length))) {
+        batch.delete(ref);
+      }
+      await batch.commit();
     }
-    batch.delete(postRef);
-    await batch.commit();
+    // The post document itself, last — so if a cleanup batch above fails the
+    // post is still present and the delete can be retried, rather than the post
+    // vanishing while its engagement lingers as orphans.
+    await postRef.delete();
 
     // Best-effort — a storage cleanup failure shouldn't block the post
     // itself from being gone. Mirrors the swallow-and-continue style in
