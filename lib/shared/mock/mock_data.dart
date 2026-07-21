@@ -169,13 +169,15 @@ final mockPosts = [
 
 final mockChats = [
   ChatModel(id: 'chat_001', type: 'dm',
-    participants: ['user_001', 'user_002'], groupName: 'Maria Chen',
+    participants: ['user_001', 'user_002'],
+    participantNames: {'user_001': 'Alex Johnson', 'user_002': 'Maria Chen'},
     lastMessage: 'Hey! Are you on the Tokyo layover next week?',
     lastMessageAt: DateTime.now().subtract(const Duration(minutes: 5)),
     unreadCount: {'user_001': 2},
     createdBy: 'user_002', createdAt: DateTime.now().subtract(const Duration(days: 3))),
   ChatModel(id: 'chat_002', type: 'dm',
-    participants: ['user_001', 'user_006'], groupName: 'Priya Patel',
+    participants: ['user_001', 'user_006'],
+    participantNames: {'user_001': 'Alex Johnson', 'user_006': 'Priya Patel'},
     lastMessage: 'That hiking trail in Banff was incredible!',
     lastMessageAt: DateTime.now().subtract(const Duration(hours: 1)),
     unreadCount: {},

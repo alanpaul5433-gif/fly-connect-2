@@ -146,7 +146,10 @@ class ChatProvider extends ChangeNotifier {
     final newId = 'chat_new_$otherUid';
     final other = mockUsers.where((u) => u.uid == otherUid).firstOrNull;
     _chats.add(ChatModel(id: newId, type: 'dm',
-      participants: ['user_001', otherUid], groupName: other?.name ?? 'User',
+      participants: ['user_001', otherUid],
+      participantNames: ChatModel.namesMap(
+        meUid: 'user_001', meName: mockCurrentUser.name,
+        otherUid: otherUid, otherName: other?.name),
       lastMessage: null, lastMessageAt: null, unreadCount: {},
       createdBy: 'user_001', createdAt: DateTime.now()));
     notifyListeners();

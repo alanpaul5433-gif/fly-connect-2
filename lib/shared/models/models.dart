@@ -235,12 +235,44 @@ class ChatModel {
   final List<String> mutedBy;
   final DateTime createdAt;
 
+  /// uid -> display name, denormalised onto the chat doc when it's created so
+  /// the chat list can render a DM title without an extra read per row.
+  /// Empty on legacy docs written before this field existed.
+  final Map<String, String> participantNames;
+
   const ChatModel({
     required this.id, required this.type, required this.participants,
     this.groupName, this.groupPhotoUrl, this.lastMessage,
     this.lastMessageSenderId, this.lastMessageAt, required this.createdBy,
     this.unreadCount = const {}, this.mutedBy = const [], required this.createdAt,
+    this.participantNames = const {},
   });
+
+  /// Builds the [participantNames] map for a new DM. Blank names are omitted
+  /// so [displayNameFor] falls through to its default rather than rendering
+  /// an empty title.
+  static Map<String, String> namesMap({
+    required String meUid, required String? meName,
+    required String otherUid, required String? otherName,
+  }) => {
+    if (meName != null && meName.trim().isNotEmpty) meUid: meName.trim(),
+    if (otherName != null && otherName.trim().isNotEmpty) otherUid: otherName.trim(),
+  };
+
+  /// Title for this chat as seen by [uid]: the group name for a group, the
+  /// other participant's name for a DM.
+  String displayNameFor(String uid) {
+    if (type == 'group') return groupName ?? 'Group';
+    // Only resolve "the other participant" when the viewer is actually one of
+    // them. Otherwise firstWhere returns participants.first — which is the
+    // viewer's own row in the common case — and we'd label the DM with the
+    // wrong person's name rather than admitting we don't know.
+    if (!participants.contains(uid)) return 'User';
+    final otherUid = participants.firstWhere((p) => p != uid, orElse: () => '');
+    final name = participantNames[otherUid];
+    if (name != null && name.isNotEmpty) return name;
+    return groupName ?? 'User';
+  }
 
   factory ChatModel.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
@@ -259,6 +291,7 @@ class ChatModel {
       unreadCount: Map<String, int>.from(d['unreadCount'] ?? {}),
       mutedBy: List<String>.from(d['mutedBy'] ?? []),
       createdAt: d['createdAt'] is DateTime ? d['createdAt'] : DateTime.now(),
+      participantNames: Map<String, String>.from(d['participantNames'] ?? {}),
     );
   }
 
@@ -267,7 +300,7 @@ class ChatModel {
     'groupPhotoUrl': groupPhotoUrl, 'lastMessage': lastMessage,
     'lastMessageSenderId': lastMessageSenderId, 'lastMessageAt': lastMessageAt,
     'createdBy': createdBy, 'unreadCount': unreadCount, 'mutedBy': mutedBy,
-    'createdAt': createdAt,
+    'createdAt': createdAt, 'participantNames': participantNames,
   };
 }
 

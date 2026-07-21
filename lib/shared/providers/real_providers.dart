@@ -34,7 +34,7 @@ UserModel _mockUserModelFor(String email, String role) {
   switch (email) {
     case 'sarah@flyconnect.com':
       return UserModel(
-        uid: 'mock_sarah', name: 'Sarah Mitchell', email: email,
+        uid: 'user_007', name: 'Sarah Mitchell', email: email,
         airline: 'British Airways', position: 'Flight Attendant',
         airport: 'LHR', city: 'London', state: 'England',
         bio: 'Cabin crew with a passion for discovering hidden gems 🌍',
@@ -48,7 +48,7 @@ UserModel _mockUserModelFor(String email, String role) {
       );
     case 'business@flyconnect.com':
       return UserModel(
-        uid: 'mock_biz1', name: 'Sky Lounge NYC', email: email,
+        uid: 'biz_001', name: 'Sky Lounge NYC', email: email,
         role: 'business', position: 'Airport Lounge', airport: 'JFK',
         city: 'New York', state: 'NY',
         bio: 'Premium airport lounge at JFK Terminal 4.',
@@ -59,7 +59,7 @@ UserModel _mockUserModelFor(String email, String role) {
       );
     case 'emirates@flyconnect.com':
       return UserModel(
-        uid: 'mock_biz2', name: 'Emirates Business Lounge', email: email,
+        uid: 'biz_002', name: 'Emirates Business Lounge', email: email,
         role: 'business', position: 'Airlines', airport: 'DXB',
         city: 'Dubai', state: 'Dubai',
         bio: 'Official Emirates lounge at Dubai International.',
@@ -70,7 +70,7 @@ UserModel _mockUserModelFor(String email, String role) {
       );
     default: // user@flyconnect.com and any other email
       return UserModel(
-        uid: 'mock_alex', name: 'Alex Johnson', email: email,
+        uid: 'user_001', name: 'Alex Johnson', email: email,
         airline: 'Delta Air Lines', position: 'Pilot',
         airport: 'JFK', city: 'New York', state: 'NY',
         bio: 'Senior pilot with 12 years of experience ✈️',
@@ -1505,7 +1505,10 @@ class ChatProvider extends ChangeNotifier {
       final newId = 'chat_new_$otherUid';
       final other = mockUsers.where((u) => u.uid == otherUid).firstOrNull;
       _chats.add(ChatModel(id: newId, type: 'dm', participants: [_uid!, otherUid],
-        groupName: other?.name ?? 'User', lastMessage: null, lastMessageAt: null,
+        participantNames: ChatModel.namesMap(
+          meUid: _uid!, meName: _storedAuth?.currentUser?.name,
+          otherUid: otherUid, otherName: other?.name),
+        lastMessage: null, lastMessageAt: null,
         unreadCount: {}, createdBy: _uid!, createdAt: DateTime.now()));
       notifyListeners();
       return newId;
@@ -1518,9 +1521,27 @@ class ChatProvider extends ChangeNotifier {
       final chat = ChatModel.fromFirestore(doc);
       if (chat.participants.contains(otherUid)) return doc.id;
     }
+    // Denormalise both display names onto the doc so the chat list can render
+    // a DM title without an extra users/{uid} read per row. A failure here
+    // must not block chat creation — displayNameFor falls back to 'User'.
+    Map<String, String> names = const {};
+    try {
+      final docs = await Future.wait([
+        _db.collection('users').doc(_uid).get(),
+        _db.collection('users').doc(otherUid).get(),
+      ]);
+      names = ChatModel.namesMap(
+        meUid: _uid!, meName: docs[0].data()?['name'] as String?,
+        otherUid: otherUid, otherName: docs[1].data()?['name'] as String?,
+      );
+    } catch (_) {
+      // Leave names empty; the tile degrades to 'User' rather than failing.
+    }
+
     final ref = _db.collection('chats').doc();
     await ref.set({
       'type': 'dm', 'participants': [_uid, otherUid],
+      'participantNames': names,
       'createdBy': _uid, 'unreadCount': {}, 'createdAt': FieldValue.serverTimestamp(),
     });
     return ref.id;
