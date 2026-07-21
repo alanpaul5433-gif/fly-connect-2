@@ -877,7 +877,12 @@ class PostProvider extends ChangeNotifier {
 
   void _resubscribeFeed() {
     _feedSub?.cancel();
+    // The audience filter is REQUIRED, not an optimisation: firestore.rules
+    // only admits a posts query that is provably limited to public posts, and
+    // Firestore rejects the whole query otherwise. Dropping this `where` makes
+    // the feed fail with permission-denied rather than over-fetch.
     _feedSub = _db.collection('posts')
+        .where('audience', isEqualTo: 'Everyone')
         .orderBy('createdAt', descending: true)
         .limit(_feedLimit)
         .snapshots()
@@ -1012,17 +1017,23 @@ class PostProvider extends ChangeNotifier {
         .asyncMap((snap) async {
       final ids = snap.docs.map((d) => d.id).toList();
       if (ids.isEmpty) return <PostModel>[];
-      final posts = <PostModel>[];
-      // Firestore caps whereIn at 30 values per query.
-      for (var i = 0; i < ids.length; i += 30) {
-        final chunk = ids.sublist(i, i + 30 > ids.length ? ids.length : i + 30);
-        final postsSnap = await _db.collection('posts')
-            .where(FieldPath.documentId, whereIn: chunk).get();
-        posts.addAll(postsSnap.docs.map((d) => PostModel.fromFirestore(d)));
-      }
-      // whereIn doesn't preserve order — resort to match savedAt order.
-      posts.sort((a, b) => ids.indexOf(a.id).compareTo(ids.indexOf(b.id)));
-      return posts;
+      // Fetched one document at a time rather than with whereIn(documentId).
+      // The posts read rule admits a query only when it is provably limited to
+      // public or own posts; a whereIn on document ids proves neither, so the
+      // batched form now fails wholesale. Single-document gets are evaluated
+      // against the actual document, so each saved post succeeds or fails on
+      // its own — a post that was made private after being saved is skipped
+      // instead of breaking the whole screen.
+      final results = await Future.wait(ids.map((id) async {
+        try {
+          final doc = await _db.collection('posts').doc(id).get();
+          return doc.exists ? PostModel.fromFirestore(doc) : null;
+        } catch (_) {
+          return null; // no longer visible to this user
+        }
+      }));
+      // Preserve savedAt order, which ids already carries.
+      return results.whereType<PostModel>().toList();
     });
   }
 
@@ -1320,10 +1331,9 @@ class PostProvider extends ChangeNotifier {
       caption: caption, mediaUrls: mediaUrls, mediaType: mediaType,
       thumbnailUrl: thumbnailUrl, aspectRatio: aspectRatio, durationMs: durationMs,
       location: location, groupId: groupId, createdAt: DateTime.now(),
+      audience: audience,
     );
-    final data = post.toFirestore();
-    data['audience'] = audience; // annotate the doc so feed queries can filter
-    await ref.set(data);
+    await ref.set(post.toFirestore());
     await _db.collection('users').doc(_uid).update({'postCount': FieldValue.increment(1)});
     notifyListeners();
   }

@@ -135,6 +135,13 @@ class PostModel {
   final DateTime createdAt;
   final DateTime? editedAt; // set on first edit (M-7); null if never edited
 
+  /// Who may see this post: 'Everyone' or 'Only me'. Enforced by
+  /// firestore.rules — the feed query must constrain on it, because Firestore
+  /// fails an entire query if any matched doc is denied. Legacy docs written
+  /// before this field existed default to 'Everyone' on read, but must still be
+  /// backfilled in Firestore for the rule to admit them.
+  final String audience;
+
   const PostModel({
     required this.id, required this.authorId, required this.authorName,
     this.authorPhotoUrl, this.mediaUrls = const [], this.mediaType = 'text',
@@ -142,6 +149,7 @@ class PostModel {
     this.caption = '', this.location, this.likeCount = 0,
     this.commentCount = 0, this.isReported = false, this.reportCount = 0,
     this.groupId, required this.createdAt, this.editedAt,
+    this.audience = 'Everyone',
   });
 
   factory PostModel.fromFirestore(DocumentSnapshot doc) {
@@ -167,6 +175,7 @@ class PostModel {
       groupId: d['groupId'],
       createdAt: d['createdAt'] is DateTime ? d['createdAt'] : DateTime.now(),
       editedAt: d['editedAt'] is DateTime ? d['editedAt'] as DateTime : null,
+      audience: d['audience'] as String? ?? 'Everyone',
     );
   }
 
@@ -177,7 +186,7 @@ class PostModel {
     'caption': caption,
     'location': location, 'likeCount': likeCount, 'commentCount': commentCount,
     'isReported': isReported, 'reportCount': reportCount, 'groupId': groupId,
-    'createdAt': createdAt, 'editedAt': editedAt,
+    'createdAt': createdAt, 'editedAt': editedAt, 'audience': audience,
   };
 }
 

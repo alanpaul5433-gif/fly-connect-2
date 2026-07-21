@@ -156,6 +156,7 @@ final List<_QuerySpec> _queries = [
   const _QuerySpec(
     label: 'home feed (PostProvider._resubscribeFeed)',
     collection: 'posts',
+    equalities: ['audience'],
     orderBy: 'createdAt',
   ),
   const _QuerySpec(

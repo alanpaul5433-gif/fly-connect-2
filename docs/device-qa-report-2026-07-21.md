@@ -36,10 +36,34 @@ final names = (chat as dynamic).participantNames;
 
 **Verified:** `flutter analyze` clean, 368/368 tests pass, and on the OnePlus the Direct tab lists "Maria Chen" and "Priya Patel" with a working unread badge, and the conversation opens correctly.
 
-### B2. Post audience / "Only me" is not enforced **[CODE]**
+### B2. Post audience / "Only me" is not enforced — ✅ FIXED 2026-07-21
 `real_providers.dart:1325`, feed query at `:880`, `firestore.rules:94`
 
-`createPost` stores `audience` (`Everyone | Connections | Only me`) and `groupId`, but the feed query applies no `where` clause and the rule is `allow read: if isAuth()`. A post marked **Only me** or targeted at a private group appears in every signed-in user's feed. This is a privacy incident, not a cosmetic bug.
+`createPost` stored `audience` (`Everyone | Connections | Only me`) and `groupId`, but the feed query applied no `where` clause and the rule was `allow read: if isAuth()`. A post marked **Only me** appeared in every signed-in user's feed.
+
+**Proven, not inferred.** A rules test against the Firestore emulator confirmed Bob could read Alice's "Only me" post, and that the shipped unconstrained feed query succeeded.
+
+**Fix applied:**
+- `firestore.rules` — posts are readable only when `audience == 'Everyone'`, the reader is the author, or the reader is an admin.
+- `PostModel` gained a typed `audience` field (defaults to `'Everyone'`, round-trips); `createPost` writes it through the model instead of bolting `data['audience']` onto the map.
+- The feed query now constrains on `audience == 'Everyone'` — **required, not an optimisation**: Firestore fails an entire query when any matched document is denied, so without the `where` the feed returns `permission-denied` rather than over-fetching.
+- Saved posts moved from `whereIn(documentId)` to per-document gets. A `whereIn` on ids proves neither condition, so the batched form would have failed wholesale; single-doc gets let a since-privatised post be skipped instead of breaking the screen.
+- `Connections` removed from the audience dropdown — it was implemented nowhere and cannot be enforced in rules without a denormalised `visibleTo` array. Better absent than presented as a working privacy control.
+- New composite index `posts(audience, createdAt)`, caught by the existing `firestore_indexes_lint_test` registry.
+
+**Deploy order matters.** A post with no `audience` field fails the rule and becomes invisible to everyone but its author. Run the backfill *before* deploying the rules:
+```
+node scripts/backfill-post-audience.js --dry-run
+node scripts/backfill-post-audience.js
+firebase deploy --only firestore:rules,firestore:indexes
+```
+A rules test pins this behaviour so the migration can't be quietly forgotten.
+
+**Coverage:** `functions/test/rules/posts.rules.test.ts`, 11 tests, run via `npm run test:rules` (wraps `firebase emulators:exec`). Needs **JDK 21+** — firebase-tools refuses older runtimes, and the default JDK here is 17; run with `export JAVA_HOME=$(/usr/libexec/java_home -v 21)`.
+
+**Still open, deliberately.** Group posts remain readable by non-members: a post with `groupId` set and `audience: 'Everyone'` is public by this rule. Enforcing group membership needs a `get()` on the group document per read, which is a separate design decision. This fix closes the "Only me" leak, not group privacy.
+
+**Also note:** viewing *another* user's posts by `authorId` is now denied unless the query also constrains `audience == 'Everyone'`. That matters when H7 (the profile grid) is fixed properly — the query must carry both clauses.
 
 ### B3. Account deletion is non-atomic and incomplete **[CODE]**
 `real_providers.dart:303-361`

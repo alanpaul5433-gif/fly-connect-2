@@ -91,7 +91,23 @@ service cloud.firestore {
 
     // ── Posts ──────────────────────────────────────────────
     match /posts/{postId} {
-      allow read: if isAuth();
+      // B2: `audience` was written by createPost but never enforced — a post
+      // marked "Only me" was readable by every signed-in user.
+      //
+      // Firestore fails the WHOLE query if any matched document is denied, so
+      // rules cannot silently filter rows. The contract is therefore: a reader
+      // may only run queries provably within this rule — i.e. constrained to
+      // audience == 'Everyone', or to their own authorId. Admins are exempt so
+      // the moderation console can scan unconstrained.
+      //
+      // NOTE: a post with no `audience` field fails the first disjunct, so
+      // every pre-existing post MUST be backfilled with audience:'Everyone'
+      // before this deploys. See scripts/backfill-post-audience.js.
+      allow read: if isAuth() && (
+           resource.data.audience == 'Everyone'
+        || isOwner(resource.data.authorId)
+        || isAdmin()
+      );
       allow create: if isAuth() && isNotBanned()
         && request.resource.data.authorId == request.auth.uid;
       // Post author may edit own fields; any authed user may increment

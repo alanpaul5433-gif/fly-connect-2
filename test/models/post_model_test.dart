@@ -19,6 +19,40 @@ void main() {
         editedAt: editedAt,
       );
 
+  group('PostModel.audience', () {
+    test('defaults to Everyone when the field is absent (legacy doc)', () async {
+      await db.collection('posts').doc('legacy').set({
+        'authorId': 'u1', 'caption': 'old post', 'createdAt': DateTime(2026, 1, 1),
+      });
+
+      final snap = await db.collection('posts').doc('legacy').get();
+
+      expect(PostModel.fromFirestore(snap).audience, 'Everyone');
+    });
+
+    test('round-trips a restricted audience', () async {
+      final post = PostModel(
+        id: 'p2', authorId: 'u1', authorName: 'Alex', caption: 'secret',
+        audience: 'Only me', createdAt: DateTime(2026, 1, 1),
+      );
+      await db.collection('posts').doc('p2').set(post.toFirestore());
+
+      final snap = await db.collection('posts').doc('p2').get();
+
+      expect(PostModel.fromFirestore(snap).audience, 'Only me');
+    });
+
+    test('toFirestore always writes audience so the feed query can match it',
+        () {
+      final post = PostModel(
+        id: 'p3', authorId: 'u1', authorName: 'Alex', caption: 'hi',
+        createdAt: DateTime(2026, 1, 1),
+      );
+
+      expect(post.toFirestore()['audience'], 'Everyone');
+    });
+  });
+
   group('PostModel.editedAt round-trip', () {
     test('a never-edited post round-trips with editedAt null', () async {
       final post = buildPost();

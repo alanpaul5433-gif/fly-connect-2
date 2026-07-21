@@ -345,7 +345,13 @@ final user = context.watch<AuthProvider>().currentUser;
                           value: _audience,
                           underline: const SizedBox(),
                           style: const TextStyle(color: AppColors.dark, fontSize: 12),
-                          items: ['Everyone', 'Connections', 'Only me']
+                          // 'Connections' was offered but implemented nowhere:
+                          // it needs a per-post follower check, which Firestore
+                          // rules cannot express in a query-compatible way
+                          // without a denormalised visibleTo array. Removed
+                          // rather than left as a control that silently
+                          // published to everyone.
+                          items: ['Everyone', 'Only me']
                               .map((s) => DropdownMenuItem(value: s, child: Text(s)))
                               .toList(),
                           onChanged: (v) => setState(() => _audience = v!),
