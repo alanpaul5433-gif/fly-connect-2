@@ -103,7 +103,7 @@ Play has required in-app account deletion since May 2024; the App Store requires
 | H9 ✅ **FIXED** | `trips_screen.dart` | `/passport/:userId` passes `userId` in, and `widget.userId` is **never referenced** (grep: 0 hits in 273 lines). Opening someone else's passport shows **your own trips**, titled "My Trips", with a live Add button and per-row Delete. See below. |
 | H10 ✅ **FIXED** | `real_providers.dart:1189` | `blockUser` writes `users/{me}/blocked/{uid}`, and **nothing reads it** — not the feed, not match candidates. User sees "You will not see their content"; their posts are still there on the next scroll. See below. |
 | H11 ✅ **FIXED** | `conversation_screen.dart:181`, `open_chat.dart:47` | Block falls back to `otherUid ?? chatId`, and `OpenChat.withUser` never passes `otherUid`. Blocking from a match/profile chat writes `blocked/{chatDocId}` — **a document id that is not a user**. Nothing is blocked. Report has the identical bug at `:225`. See below. |
-| H12 **[CODE]** | `home_screen.dart:198` | `_PostCard` is stateful with per-post state set once in `initState`, built **with no `key`**. The feed prepends new posts → like/save state and counts shift onto the wrong cards and never correct themselves. |
+| H12 ✅ **FIXED** | `home_screen.dart:198` | `_PostCard` is stateful with per-post state set once in `initState`, built **with no `key`**. The feed prepends new posts → like/save state and counts shift onto the wrong cards and never correct themselves. See below. |
 | H13 ✅ **FIXED** | `real_providers.dart:1101` | `deletePost` batches deletion of all comments + likes, but rules only allow their owners to delete them (`firestore.rules:118,124`). One denial fails the whole commit → **a post anyone else liked or commented on can never be deleted**. See below. |
 | H14 ✅ **FIXED** | `real_providers.dart:1851` | `loadCandidates` has no try/catch around two Firestore reads. Offline or `permission-denied` leaves `_loading` stuck true → **Match tab is a permanent spinner** with no error and no retry. See below. |
 | H15 ✅ **FIXED** | `real_providers.dart:1870` | Candidate query excludes neither already-matched/passed users nor blocked users. **Passed profiles come straight back**, and `passUser` `add()`s a fresh doc per pass (duplicate rows forever). See below. |
@@ -246,6 +246,17 @@ Worse, it couldn't be fixed by just reading `UserProvider` instead: **`UserProvi
 **Coverage:** `location_share_gate_test.dart` (5 tests) — no write when off, reads the *current* value not a stale one, exact vs. fuzzed coordinate, default-on when settings absent. The existing helper tests moved with them.
 
 **Residuals (noted, not fixed here):** the SafeCheck check-in call site still fuzzes with `user.settings` (stale `approxLocationOnly`) — a lesser concern since check-in is explicit consent, only the fuzz *precision* can lag. And the root cause — `UserProvider.updateAuth` clobbering fresh state — is exactly what the **provider DI refactor** would resolve properly; this fix routes around it for the one privacy-critical path.
+
+### H12. Like/save state landed on the wrong post — ✅ FIXED 2026-07-21
+`home_screen.dart`
+
+`_PostCard` is a `StatefulWidget` whose `_liked` / `_saved` / `_likeCount` are seeded once in `initState`, and it was built with **no `key`**. When the feed prepends a post (a new post, or a refresh that reorders), Flutter reuses `_PostCardState` **positionally** — so the state computed for the post that *was* at index 0 stays there while a different post slides into that row. Result: a filled heart and a like count attached to a post you never liked, permanently, because `initState` never re-runs.
+
+**Fix:**
+- `_PostCard(key: ValueKey(post.id), …)` — a stable identity key binds each `State` to its post across list mutations, which is the actual fix.
+- `didUpdateWidget` re-seeds from the new post **only when the post id changes**, as a safety net for any residual element reuse. Guarded on id change so a same-post snapshot re-emit can't stomp an in-flight optimistic like.
+
+**Coverage — the one fix this session without a dedicated test, stated plainly.** `_PostCard` is private and `FeedTab` needs five mocked providers plus network-image cards with async `isLiked` to pump — the same provider-DI wall flagged throughout. `ValueKey`-follows-identity is a Flutter framework guarantee (covered by Flutter's own tests), so a widget test here would largely assert the framework. `flutter analyze` is clean and all 462 tests still pass (no regression). On-device repro (like a post, create another to prepend, confirm the heart stays put) is **pending** — the OnePlus disconnected at ~7% battery mid-session.
 
 ## Missing components
 

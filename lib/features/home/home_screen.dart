@@ -195,7 +195,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       );
                     }
-                    return _PostCard(post: posts[i - 1], index: i - 1);
+                    // H12: a stable key tied to post identity. Without it,
+                    // Flutter reuses _PostCardState positionally, so when the
+                    // feed prepends a new post the like/save state and counts —
+                    // seeded once in initState — stay attached to the wrong row.
+                    final post = posts[i - 1];
+                    return _PostCard(key: ValueKey(post.id), post: post, index: i - 1);
                   },
                 ),
               );
@@ -528,7 +533,7 @@ class _PromoMiniCard extends StatelessWidget {
 class _PostCard extends StatefulWidget {
   final PostModel post;
   final int index;
-  const _PostCard({required this.post, required this.index});
+  const _PostCard({super.key, required this.post, required this.index});
   @override
   State<_PostCard> createState() => _PostCardState();
 }
@@ -544,6 +549,23 @@ class _PostCardState extends State<_PostCard> {
     _likeCount = widget.post.likeCount;
     _checkLiked();
     _checkSaved();
+  }
+
+  @override
+  void didUpdateWidget(_PostCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Safety net for H12: the ValueKey should keep each State bound to one
+    // post, but if an element is ever reused for a DIFFERENT post, re-seed from
+    // the new post rather than showing the previous one's like/save state.
+    // Guarded on id change so it never fights the optimistic toggle for the
+    // same post (a snapshot re-emit must not stomp an in-flight like).
+    if (oldWidget.post.id != widget.post.id) {
+      _likeCount = widget.post.likeCount;
+      _liked = false;
+      _saved = false;
+      _checkLiked();
+      _checkSaved();
+    }
   }
 
   Future<void> _checkLiked() async {
