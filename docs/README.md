@@ -8,8 +8,8 @@ All the documentation needed to take FlyConnect from "code complete" to "live in
 
 | File | Purpose |
 |------|---------|
-| [privacy-policy.md](./privacy-policy.md) | Full privacy policy content. Host at `flyconnect.app/privacy`. Required by Play Store. |
-| [terms-of-service.md](./terms-of-service.md) | Full ToS content. Host at `flyconnect.app/terms`. Linked from signup consent. |
+| [privacy-policy.md](./privacy-policy.md) | Full privacy policy content. Live at `flyconnect.co/privacy-policy/`. Required by Play Store. |
+| [terms-of-service.md](./terms-of-service.md) | Full ToS content. Live at `flyconnect.co/terms-of-service/`. Linked from signup consent. |
 
 ### Store submission
 

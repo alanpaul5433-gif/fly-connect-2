@@ -7,13 +7,16 @@ import '../../shared/providers/chat_provider.dart';
 import '../../shared/providers/auth_provider.dart';
 import '../../shared/providers/post_provider.dart';
 import '../../shared/models/models.dart';
+import 'package:image_picker/image_picker.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class ConversationScreen extends StatefulWidget {
   final String chatId;
   final String otherName;
   final String? otherPhotoUrl;
+  final String? otherUid;
   final bool isGroup;
-  const ConversationScreen({super.key, required this.chatId, required this.otherName, this.otherPhotoUrl, this.isGroup = false});
+  const ConversationScreen({super.key, required this.chatId, required this.otherName, this.otherPhotoUrl, this.otherUid, this.isGroup = false});
   @override State<ConversationScreen> createState() => _ConversationScreenState();
 }
 
@@ -25,7 +28,16 @@ class _ConversationScreenState extends State<ConversationScreen> {
   @override
   void initState() {
     super.initState();
-    context.read<ChatProvider>().markAsRead(widget.chatId);
+    final chatProvider = context.read<ChatProvider>();
+    chatProvider.markAsRead(widget.chatId);
+    chatProvider.markMessagesRead(widget.chatId);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _scroll.dispose();
+    super.dispose();
   }
 
   void _send() async {
@@ -55,7 +67,40 @@ class _ConversationScreenState extends State<ConversationScreen> {
     });
   }
 
-  void _showConversationMenu() {
+  Future<void> _pickAndSendImage(ImageSource source) async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: source);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    if (!mounted) return;
+    setState(() => _sending = true);
+    try {
+      final url = await context.read<ChatProvider>().uploadChatImage(bytes);
+      if (!mounted) return;
+      if (url == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Image upload failed. Please try again.'),
+          backgroundColor: Colors.red,
+        ));
+        return;
+      }
+      final caption = _ctrl.text.trim();
+      _ctrl.clear();
+      await context
+          .read<ChatProvider>()
+          .sendMessage(widget.chatId, caption, mediaUrl: url, mediaType: 'image');
+      if (!mounted) return;
+      _scrollToBottom();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send image: $e'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  void _showAttachSheet() {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -63,54 +108,91 @@ class _ConversationScreenState extends State<ConversationScreen> {
       builder: (_) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(
-            leading: const Icon(Icons.notifications_off_outlined),
-            title: const Text('Mute notifications'),
-            subtitle: const Text('Coming soon', style: TextStyle(fontSize: 11)),
+            leading: const Icon(Icons.photo_camera_outlined),
+            title: const Text('Take photo'),
             onTap: () {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Muting is not yet available in this build.'),
-                duration: Duration(seconds: 2),
-              ));
+              _pickAndSendImage(ImageSource.camera);
             },
           ),
           ListTile(
-            leading: const Icon(Icons.delete_outline, color: Colors.red),
-            title: const Text('Clear conversation',
-                style: TextStyle(color: Colors.red)),
+            leading: const Icon(Icons.photo_library_outlined),
+            title: const Text('Choose from gallery'),
             onTap: () {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Clear conversation is not yet available'),
-                duration: Duration(seconds: 2),
-              ));
+              _pickAndSendImage(ImageSource.gallery);
+            },
+          ),
+        ]),
+      ),
+    );
+  }
+
+  void _openFullscreenImage(String url) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: InteractiveViewer(
+            child: CachedFeedImage(url: url, fit: BoxFit.contain),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showConversationMenu() {
+    final chatProvider = context.read<ChatProvider>();
+    final myUid = context.read<AuthProvider>().currentUser?.uid ?? '';
+    final chat = chatProvider.chats.where((c) => c.id == widget.chatId).firstOrNull;
+    final isMuted = chat?.mutedBy.contains(myUid) ?? false;
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: Icon(isMuted ? Icons.notifications_active_outlined : Icons.notifications_off_outlined),
+            title: Text(isMuted ? 'Unmute conversation' : 'Mute conversation'),
+            onTap: () async {
+              Navigator.pop(context);
+              await chatProvider.toggleMute(widget.chatId);
             },
           ),
           ListTile(
             leading: const Icon(Icons.flag_outlined, color: Colors.red),
-            title:
-                const Text('Report user', style: TextStyle(color: Colors.red)),
+            title: Text(widget.isGroup ? 'Report conversation' : 'Report user',
+                style: const TextStyle(color: Colors.red)),
             onTap: () {
               Navigator.pop(context);
               _showReportSheet();
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.block, color: Colors.red),
-            title: const Text('Block user', style: TextStyle(color: Colors.red)),
-            onTap: () async {
-              Navigator.pop(context);
-              await context
-                  .read<PostProvider>()
-                  .blockUser(widget.chatId); // chatId == other user's uid for DMs
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('User blocked. You will not see their content.'),
-                  duration: Duration(seconds: 2),
-                ));
-              }
-            },
-          ),
+          // Only offered when we actually know who the other person is. The
+          // old `widget.otherUid ?? widget.chatId` fallback meant a chat opened
+          // without that param blocked the CHAT DOCUMENT ID as though it were a
+          // user: the write succeeded, the snackbar promised the user would see
+          // no more of their content, and nobody was blocked. Hiding the action
+          // is honest; a confirmation for something that didn't happen is not.
+          if (!widget.isGroup && widget.otherUid != null && widget.otherUid!.isNotEmpty)
+            ListTile(
+              leading: const Icon(Icons.block, color: Colors.red),
+              title: const Text('Block user', style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                Navigator.pop(context);
+                await context.read<PostProvider>().blockUser(widget.otherUid!);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('User blocked. You will not see their content.'),
+                    duration: Duration(seconds: 2),
+                  ));
+                }
+              },
+            ),
         ]),
       ),
     );
@@ -143,9 +225,15 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 title: Text(r),
                 onTap: () async {
                   Navigator.pop(context);
+                  // Report the user when we know who they are, otherwise report
+                  // the conversation. Previously the chat id was filed under
+                  // targetType 'user', so moderators received reports pointing
+                  // at a user that does not exist.
+                  final reportUser =
+                      !widget.isGroup && (widget.otherUid?.isNotEmpty ?? false);
                   await context.read<PostProvider>().reportContent(
-                        targetType: widget.isGroup ? 'chat' : 'user',
-                        targetId: widget.chatId,
+                        targetType: reportUser ? 'user' : 'chat',
+                        targetId: reportUser ? widget.otherUid! : widget.chatId,
                         reason: r,
                       );
                   if (mounted) {
@@ -163,15 +251,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
     );
   }
 
-  Future<void> _pickImage() async {
-    // Image uploads are not yet wired to Firebase Storage.
-    // Show a clear message rather than silently dropping the picked image.
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Image messages are coming soon. You can send text for now.'),
-      duration: Duration(seconds: 2),
-    ));
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -254,7 +333,30 @@ class _ConversationScreenState extends State<ConversationScreen> {
                           // for incoming bubbles — primary fails contrast there.
                           // AppColors.dark gives 13.6:1 and reads clearly.
                           style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.dark)),
-                        Text(m.text, style: TextStyle(color: isMe ? AppColors.dark : Colors.black87, fontSize: 15)),
+                        if (m.mediaType == 'image' && m.mediaUrl != null) ...[
+                          GestureDetector(
+                            onTap: () => _openFullscreenImage(m.mediaUrl!),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: CachedFeedImage(
+                                url: m.mediaUrl!,
+                                width: 200,
+                                height: 200,
+                                fit: BoxFit.cover,
+                                placeholder: Container(
+                                  width: 200, height: 200, color: Colors.grey.shade200,
+                                  child: const Center(
+                                      child: CircularProgressIndicator(strokeWidth: 2))),
+                                errorWidget: Container(
+                                  width: 200, height: 200, color: Colors.grey.shade200,
+                                  child: const Icon(Icons.broken_image_outlined, color: Colors.grey)),
+                              ),
+                            ),
+                          ),
+                          if (m.text.isNotEmpty) const SizedBox(height: 6),
+                        ],
+                        if (m.text.isNotEmpty)
+                          Text(m.text, style: TextStyle(color: isMe ? AppColors.dark : Colors.black87, fontSize: 15)),
                         const SizedBox(height: 2),
                         Row(mainAxisSize: MainAxisSize.min, children: [
                           Text(timeago.format(m.createdAt, allowFromNow: true),
@@ -278,10 +380,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
             border: Border(top: BorderSide(color: Colors.grey.shade200))),
           child: Row(children: [
             IconButton(
-              icon: const Icon(Icons.add_circle_outline),
-              color: Colors.grey,
-              tooltip: 'Attach image',
-              onPressed: _pickImage,
+              icon: const Icon(Icons.add_photo_alternate_outlined, color: AppColors.dark),
+              tooltip: 'Attach photo',
+              onPressed: _sending ? null : _showAttachSheet,
             ),
             Expanded(child: TextField(
               controller: _ctrl,

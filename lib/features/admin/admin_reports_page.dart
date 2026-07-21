@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/constants/app_colors.dart';
 import 'admin_audit_helper.dart';
 
@@ -166,6 +167,68 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
     );
     if (!confirmed) return;
     await _updateStatus(docId, 'dismissed');
+  }
+
+  /// Opens the reported entity so an admin can review it in context (M-7 —
+  /// this button was previously a no-op even though targetType/targetId are
+  /// already written onto every report by reportPost/reportContent).
+  void _viewTarget(Map<String, dynamic> r) {
+    final targetType = (r['targetType'] ?? '') as String;
+    final targetId = (r['targetId'] ?? '') as String;
+    if (targetId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No target reference on this report.')));
+      return;
+    }
+    switch (targetType) {
+      case 'post':
+        GoRouter.of(context).push('/posts/$targetId');
+        break;
+      case 'user':
+        GoRouter.of(context).push('/users/$targetId');
+        break;
+      case 'group':
+        GoRouter.of(context).push('/groups/$targetId');
+        break;
+      case 'chat':
+        GoRouter.of(context).push('/conversation/$targetId');
+        break;
+      default:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Cannot open a "$targetType" target directly.')));
+    }
+  }
+
+  /// Bans the user who filed a (typically abusive/retaliatory) low-severity
+  /// report. Mirrors admin_users_page.dart's _toggleBan write shape — no
+  /// shared provider method exists yet for banning, so this replicates the
+  /// same direct Firestore update + audit-log call (M-7).
+  Future<void> _banReporter(Map<String, dynamic> r) async {
+    final reporterId = r['reporterId'] as String?;
+    if (reporterId == null || reporterId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No reporter on file for this report.')));
+      return;
+    }
+    final confirmed = await _showConfirm(
+      context,
+      title: 'Ban Reporter',
+      message: 'Ban the user who filed this report? They will not be able to log in.',
+      confirmLabel: 'Ban',
+      confirmColor: AppColors.error,
+    );
+    if (!confirmed) return;
+    await FirebaseFirestore.instance.collection('users').doc(reporterId).update({'isBanned': true});
+    await logAdminAction(
+      action: 'ban_user',
+      targetType: 'user',
+      targetId: reporterId,
+      details: 'Banned reporter of report ${r['id']} (low-severity report)',
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Reporter banned.')));
+    }
   }
 
   Future<bool> _showConfirm(
@@ -514,7 +577,7 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
                           width: 100,
                           height: 32,
                           child: OutlinedButton(
-                            onPressed: () {},
+                            onPressed: () => _viewTarget(r),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.blue,
                               side: const BorderSide(color: Colors.blue),
@@ -568,7 +631,7 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
                             width: 110,
                             height: 32,
                             child: OutlinedButton(
-                              onPressed: () {},
+                              onPressed: () => _banReporter(r),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: AppColors.error,
                                 side: const BorderSide(color: AppColors.error),

@@ -6,6 +6,7 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_routes.dart';
 import '../../shared/providers/search_provider.dart';
 import '../../shared/models/models.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -106,10 +107,11 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
       itemBuilder: (_, i) {
         final u = users[i];
         return ListTile(
-          leading: CircleAvatar(
-            backgroundImage: u.photoUrl != null ? NetworkImage(u.photoUrl!) : null,
+          leading: CachedAvatar(
+            url: u.photoUrl,
+            radius: 20,
             backgroundColor: AppColors.dark,
-            child: u.photoUrl == null ? Text(u.name.isNotEmpty ? u.name[0] : '?', style: const TextStyle(color: Colors.white)) : null),
+            fallback: Text(u.name.isNotEmpty ? u.name[0] : '?', style: const TextStyle(color: Colors.white))),
           title: Text(u.name, style: const TextStyle(fontWeight: FontWeight.w600)),
           subtitle: Text('${u.airline ?? ''} · ${u.position ?? ''}', style: const TextStyle(fontSize: 12)),
           trailing: OutlinedButton(
@@ -134,10 +136,11 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
       itemBuilder: (_, i) {
         final g = groups[i];
         return ListTile(
-          leading: CircleAvatar(
-            backgroundImage: g.imageUrl != null ? NetworkImage(g.imageUrl!) : null,
+          leading: CachedAvatar(
+            url: g.imageUrl,
+            radius: 20,
             backgroundColor: AppColors.primary,
-            child: g.imageUrl == null ? const Icon(Icons.group, color: AppColors.dark) : null),
+            fallback: const Icon(Icons.group, color: AppColors.dark)),
           title: Text(g.name, style: const TextStyle(fontWeight: FontWeight.w600)),
           subtitle: Text('${g.memberCount} members', style: const TextStyle(fontSize: 12)),
           onTap: () => context.push('${AppRoutes.groupDetails}/${g.id}'),

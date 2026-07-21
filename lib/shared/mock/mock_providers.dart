@@ -146,7 +146,10 @@ class ChatProvider extends ChangeNotifier {
     final newId = 'chat_new_$otherUid';
     final other = mockUsers.where((u) => u.uid == otherUid).firstOrNull;
     _chats.add(ChatModel(id: newId, type: 'dm',
-      participants: ['user_001', otherUid], groupName: other?.name ?? 'User',
+      participants: ['user_001', otherUid],
+      participantNames: ChatModel.namesMap(
+        meUid: 'user_001', meName: mockCurrentUser.name,
+        otherUid: otherUid, otherName: other?.name),
       lastMessage: null, lastMessageAt: null, unreadCount: {},
       createdBy: 'user_001', createdAt: DateTime.now()));
     notifyListeners();
@@ -227,18 +230,21 @@ class MatchProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> likeUser(String targetUid, String matchType) async {
+  /// Returns whether the like produced a mutual match — see the real
+  /// MatchProvider.likeUser. Keyed off the target uid rather than the wall
+  /// clock so the same card gives the same answer every run.
+  Future<bool> likeUser(String targetUid, String matchType) async {
     _candidates.removeWhere((u) => u.uid == targetUid);
-    if (DateTime.now().millisecond % 2 == 0) {
-      final matched = mockUsers.where((u) => u.uid == targetUid).firstOrNull;
-      if (matched != null) {
-        _matches.add(MatchModel(
-          id: 'match_$targetUid', userA: 'user_001', userB: targetUid,
-          status: 'matched', matchType: matchType,
-          likedAt: DateTime.now(), matchedAt: DateTime.now()));
-      }
+    final matched = mockUsers.where((u) => u.uid == targetUid).firstOrNull;
+    final isMatch = matched != null && targetUid.hashCode.isEven;
+    if (isMatch) {
+      _matches.add(MatchModel(
+        id: 'match_$targetUid', userA: 'user_001', userB: targetUid,
+        status: 'matched', matchType: matchType,
+        likedAt: DateTime.now(), matchedAt: DateTime.now()));
     }
     notifyListeners();
+    return isMatch;
   }
 
   Future<void> passUser(String targetUid) async {

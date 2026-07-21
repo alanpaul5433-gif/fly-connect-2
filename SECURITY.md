@@ -12,7 +12,7 @@ If you discover a security issue, please **do not** open a public
 GitHub issue or post about it on social media. We follow a 90-day
 coordinated-disclosure window.
 
-Email: **security@flyconnect.app** *(placeholder — replace with your real
+Email: **security@flyconnect.co** *(placeholder — replace with your real
 inbox before launch)*
 
 Please include:

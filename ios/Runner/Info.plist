@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 	<dict>
+		<key>CADisableMinimumFrameDurationOnPhone</key>
+		<true/>
 		<key>CFBundleDevelopmentRegion</key>
 		<string>$(DEVELOPMENT_LANGUAGE)</string>
 		<key>CFBundleDisplayName</key>
@@ -20,14 +22,94 @@
 		<string>$(FLUTTER_BUILD_NAME)</string>
 		<key>CFBundleSignature</key>
 		<string>????</string>
+		<key>CFBundleURLTypes</key>
+		<array>
+			<dict>
+				<key>CFBundleTypeRole</key>
+				<string>Editor</string>
+				<key>CFBundleURLName</key>
+				<string>com.urbansyncinnovations.flyconnect</string>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<string>flyconnect</string>
+				</array>
+			</dict>
+			<dict>
+				<key>CFBundleTypeRole</key>
+				<string>Editor</string>
+				<key>CFBundleURLName</key>
+				<string>com.google.GIDSignIn</string>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<string>com.googleusercontent.apps.361504801284-7qg36av1juoccclkthio2c0bs12s8f35</string>
+				</array>
+			</dict>
+		</array>
 		<key>CFBundleVersion</key>
 		<string>$(FLUTTER_BUILD_NUMBER)</string>
+		<key>FirebaseAppDelegateProxyEnabled</key>
+		<true/>
+		<key>GIDClientID</key>
+		<string>361504801284-7qg36av1juoccclkthio2c0bs12s8f35.apps.googleusercontent.com</string>
+		<key>ITSAppUsesNonExemptEncryption</key>
+		<false/>
+		<key>LSApplicationQueriesSchemes</key>
+		<array>
+			<string>http</string>
+			<string>https</string>
+			<string>tel</string>
+			<string>mailto</string>
+			<string>sms</string>
+		</array>
 		<key>LSRequiresIPhoneOS</key>
 		<true/>
+		<key>NSAppTransportSecurity</key>
+		<dict>
+			<key>NSAllowsArbitraryLoads</key>
+			<false/>
+		</dict>
+		<key>NSCameraUsageDescription</key>
+		<string>FlyConnect uses your camera so you can take photos and videos for posts, profile pictures, and stories.</string>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>FlyConnect needs microphone access so you can record video with sound for your posts.</string>
+		<key>NSLocationWhenInUseUsageDescription</key>
+		<string>FlyConnect uses your location to show you nearby crew members and to attach your location to SafeCheck check-ins when you choose to share it.</string>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>FlyConnect needs access to your photo library so you can choose photos for posts, profile pictures, and stories.</string>
+		<key>UIApplicationSceneManifest</key>
+		<dict>
+			<key>UIApplicationSupportsMultipleScenes</key>
+			<false/>
+			<key>UISceneConfigurations</key>
+			<dict>
+				<key>UIWindowSceneSessionRoleApplication</key>
+				<array>
+					<dict>
+						<key>UISceneClassName</key>
+						<string>UIWindowScene</string>
+						<key>UISceneConfigurationName</key>
+						<string>flutter</string>
+						<key>UISceneDelegateClassName</key>
+						<string>FlutterSceneDelegate</string>
+						<key>UISceneStoryboardFile</key>
+						<string>Main</string>
+					</dict>
+				</array>
+			</dict>
+		</dict>
+		<key>UIApplicationSupportsIndirectInputEvents</key>
+		<true/>
+		<key>UIBackgroundModes</key>
+		<array>
+			<string>fetch</string>
+			<string>remote-notification</string>
+		</array>
 		<key>UILaunchStoryboardName</key>
 		<string>LaunchScreen</string>
 		<key>UIMainStoryboardFile</key>
 		<string>Main</string>
+		<key>UIStatusBarHidden</key>
+		<false/>
 		<key>UISupportedInterfaceOrientations</key>
 		<array>
 			<string>UIInterfaceOrientationPortrait</string>
@@ -41,92 +123,5 @@
 			<string>UIInterfaceOrientationLandscapeLeft</string>
 			<string>UIInterfaceOrientationLandscapeRight</string>
 		</array>
-		<key>CADisableMinimumFrameDurationOnPhone</key>
-		<true/>
-		<key>UIApplicationSupportsIndirectInputEvents</key>
-		<true/>
-		<!-- ==================== Permission Usage Descriptions ==================== -->
-		<!-- Apple 5.1.1 requires clear, user-facing reasons for each permission. -->
-		<!-- Button wording at the pre-prompt MUST be neutral ("Continue" / "Next") -->
-		<!-- and NOT "Allow Access" (which triggers Guideline 5.1.1(iv) rejection). -->
-		<key>NSLocationWhenInUseUsageDescription</key>
-		<string>FlyConnect uses your location to show you nearby crew members and to attach your location to SafeCheck check-ins when you choose to share it.</string>
-		<key>NSCameraUsageDescription</key>
-		<string>FlyConnect uses your camera so you can take photos for posts, profile pictures, and stories.</string>
-		<key>NSPhotoLibraryUsageDescription</key>
-		<string>FlyConnect needs access to your photo library so you can choose photos for posts, profile pictures, and stories.</string>
-		<!--
-		Audit 2026-05: removed the following keys because the underlying
-		features are not yet wired in the app. Declaring unused
-		permissions is misleading to App Store reviewers and to the
-		App Privacy nutrition label. Re-add (with the original
-		descriptions in git history) when the feature ships.
-		  • NSPhotoLibraryAddUsageDescription (saving to library)
-		  • NSMicrophoneUsageDescription      (video recording)
-		  • NSContactsUsageDescription        (contact matching)
-		-->
-		<key>NSUserTrackingUsageDescription</key>
-		<string>FlyConnect uses anonymous analytics to improve the app. We do not share your activity with other companies or apps.</string>
-		<!-- ==================== URL Schemes ==================== -->
-		<key>CFBundleURLTypes</key>
-		<array>
-			<!-- Deep link scheme for in-app navigation and email links -->
-			<dict>
-				<key>CFBundleTypeRole</key>
-				<string>Editor</string>
-				<key>CFBundleURLName</key>
-				<string>com.appcurb.flyconnect</string>
-				<key>CFBundleURLSchemes</key>
-				<array>
-					<string>flyconnect</string>
-				</array>
-			</dict>
-			<!-- Google Sign-In reversed client ID.                     -->
-			<!-- REPLACE the placeholder below with the REVERSED_CLIENT_ID -->
-			<!-- from GoogleService-Info.plist once Firebase Console has  -->
-			<!-- registered the iOS app.                                   -->
-			<dict>
-				<key>CFBundleTypeRole</key>
-				<string>Editor</string>
-				<key>CFBundleURLName</key>
-				<string>com.google.GIDSignIn</string>
-				<key>CFBundleURLSchemes</key>
-				<array>
-					<string>com.googleusercontent.apps.REPLACE_WITH_REVERSED_CLIENT_ID</string>
-				</array>
-			</dict>
-		</array>
-		<!-- ==================== App Transport Security ==================== -->
-		<!-- Strict HTTPS \u2014 no arbitrary exceptions. Matches AndroidManifest stance. -->
-		<key>NSAppTransportSecurity</key>
-		<dict>
-			<key>NSAllowsArbitraryLoads</key>
-			<false/>
-		</dict>
-		<!-- ==================== Push Notifications ==================== -->
-		<!-- Background modes required for FCM delivery when the app is backgrounded. -->
-		<key>UIBackgroundModes</key>
-		<array>
-			<string>fetch</string>
-			<string>remote-notification</string>
-		</array>
-		<key>FirebaseAppDelegateProxyEnabled</key>
-		<false/>
-		<!-- ==================== LSApplicationQueriesSchemes ==================== -->
-		<!-- Allow url_launcher to check availability before opening URLs. -->
-		<key>LSApplicationQueriesSchemes</key>
-		<array>
-			<string>http</string>
-			<string>https</string>
-			<string>tel</string>
-			<string>mailto</string>
-			<string>sms</string>
-		</array>
-		<!-- ==================== ITSAppUsesNonExemptEncryption ==================== -->
-		<!-- FlyConnect only uses standard HTTPS/TLS \u2014 exempt from CCATS. -->
-		<key>ITSAppUsesNonExemptEncryption</key>
-		<false/>
-		<key>UIStatusBarHidden</key>
-		<false/>
 	</dict>
 </plist>

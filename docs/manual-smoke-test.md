@@ -198,6 +198,37 @@
 - [ ] Memory usage after 5 min of browsing < 300 MB
 - [ ] No Firestore listeners leaking (Firebase Console → Firestore usage → not growing exponentially)
 
+## 19. Business Dashboard Walkthrough
+
+Requires **two** business accounts (e.g. `info@skyloungelnyc.com` plus a second seeded business account) and one plain crew account — see `docs/business-user-flow-test-plan.md` for full detail on every fix this section verifies.
+
+**Cross-tenant scoping (A3/A4):**
+- [ ] Business A creates a deal and an event
+- [ ] Business B logs in → their own "Crew Deals" and "Events" tabs show **zero** of Business A's items
+- [ ] Business B cannot reach Business A's event via any "Manage" button (none should be visible)
+
+**Ownership guard (A4):**
+- [ ] Deep-link Business B into Business A's event management screen (if reachable at all) → permission-denied message, not the attendee roster
+
+**Moderation gate (A1/A2):**
+- [ ] Business A creates an event → does **not** appear in the crew-facing Events tab yet
+- [ ] Admin approves it → now appears in the crew-facing Events tab
+- [ ] Business A's own "Business Events" tab shows the pending event throughout (before and after approval)
+
+**Route guards (A5):**
+- [ ] Logged in as the plain crew account, deep-link to `/promotions/create`, `/analytics`, `/business-profile` → redirected to home, screens never render
+
+**Business → user reflection (B1):**
+- [ ] As the crew account, open an event created by a verified business → a "Hosted by [Business Name] ✓" row appears above the description, tappable to the business's profile
+- [ ] Same check for a group
+- [ ] Tap through to the business's profile from anywhere (post, event, group, search) → shows a ✓ verified badge and a business-style pill instead of "airline · position" — previously this always showed a completely generic profile with no indication of a business account
+
+**Notifications (B2):**
+- [ ] As the crew account, follow Business A
+- [ ] Business A publishes a new deal, gets admin-approved → the crew account receives a notification ("Sky Lounge NYC posted [deal title]"), tapping it opens the deal
+- [ ] Repeat for an event and a group
+- [ ] Business A publishes a second deal within a few hours → **no** second notification (6-hour cooldown) — confirm the deal itself is still visible/live, only the push is throttled
+
 ---
 
 ## Exit criteria

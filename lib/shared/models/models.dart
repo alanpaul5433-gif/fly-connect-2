@@ -28,6 +28,11 @@ class UserModel {
   final bool isBanned;
   final DateTime createdAt;
   final DateTime? lastSeen;
+  final Map<String, dynamic> settings;
+  // Last-known shared position (Nearby/SafeCheck), written only when the
+  // user's 'shareLocation' setting is on — see LocationService/H-4.
+  final double? lat;
+  final double? lng;
 
   const UserModel({
     required this.uid, required this.name, required this.email,
@@ -38,6 +43,7 @@ class UserModel {
     this.followerCount = 0, this.followingCount = 0, this.postCount = 0,
     this.fcmToken, this.role = 'user', this.isVerified = false,
     this.isBanned = false, required this.createdAt, this.lastSeen,
+    this.settings = const {}, this.lat, this.lng,
   });
 
   factory UserModel.fromMap(Map<String, dynamic> d, String id) => UserModel(
@@ -56,6 +62,8 @@ class UserModel {
     isVerified: d['isVerified'] ?? false, isBanned: d['isBanned'] ?? false,
     createdAt: d['createdAt'] is DateTime ? d['createdAt'] : DateTime.now(),
     lastSeen: d['lastSeen'] is DateTime ? d['lastSeen'] : null,
+    settings: Map<String, dynamic>.from(d['settings'] ?? {}),
+    lat: (d['lat'] as num?)?.toDouble(), lng: (d['lng'] as num?)?.toDouble(),
   );
 
   Map<String, dynamic> toMap() => {
@@ -67,6 +75,7 @@ class UserModel {
     'followingCount': followingCount, 'postCount': postCount,
     'fcmToken': fcmToken, 'role': role, 'isVerified': isVerified,
     'isBanned': isBanned, 'createdAt': createdAt, 'lastSeen': lastSeen,
+    'settings': settings, 'lat': lat, 'lng': lng,
   };
 
   factory UserModel.fromFirestore(DocumentSnapshot doc) {
@@ -84,6 +93,7 @@ class UserModel {
     List<String>? hobbies, List<String>? passportStamps,
     List<String>? travelHistory, String? matchType, String? fcmToken,
     int? followerCount, int? followingCount, int? postCount,
+    Map<String, dynamic>? settings, double? lat, double? lng,
   }) => UserModel(
     uid: uid, email: email, createdAt: createdAt, phone: phone,
     name: name ?? this.name, photoUrl: photoUrl ?? this.photoUrl,
@@ -98,6 +108,8 @@ class UserModel {
     followerCount: followerCount ?? this.followerCount,
     followingCount: followingCount ?? this.followingCount,
     postCount: postCount ?? this.postCount,
+    settings: settings ?? this.settings,
+    lat: lat ?? this.lat, lng: lng ?? this.lng,
     role: role, isVerified: isVerified, isBanned: isBanned,
   );
 }
@@ -110,6 +122,9 @@ class PostModel {
   final String? authorPhotoUrl;
   final List<String> mediaUrls;
   final String mediaType;
+  final String? thumbnailUrl; // poster frame for video posts
+  final double? aspectRatio;  // width/height of the video, for layout
+  final int? durationMs;      // video length in milliseconds
   final String caption;
   final String? location;
   final int likeCount;
@@ -118,18 +133,29 @@ class PostModel {
   final int reportCount;
   final String? groupId;
   final DateTime createdAt;
+  final DateTime? editedAt; // set on first edit (M-7); null if never edited
+
+  /// Who may see this post: 'Everyone' or 'Only me'. Enforced by
+  /// firestore.rules — the feed query must constrain on it, because Firestore
+  /// fails an entire query if any matched doc is denied. Legacy docs written
+  /// before this field existed default to 'Everyone' on read, but must still be
+  /// backfilled in Firestore for the rule to admit them.
+  final String audience;
 
   const PostModel({
     required this.id, required this.authorId, required this.authorName,
     this.authorPhotoUrl, this.mediaUrls = const [], this.mediaType = 'text',
+    this.thumbnailUrl, this.aspectRatio, this.durationMs,
     this.caption = '', this.location, this.likeCount = 0,
     this.commentCount = 0, this.isReported = false, this.reportCount = 0,
-    this.groupId, required this.createdAt,
+    this.groupId, required this.createdAt, this.editedAt,
+    this.audience = 'Everyone',
   });
 
   factory PostModel.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
     if (d['createdAt'] is Timestamp) d['createdAt'] = (d['createdAt'] as Timestamp).toDate();
+    if (d['editedAt'] is Timestamp) d['editedAt'] = (d['editedAt'] as Timestamp).toDate();
     return PostModel(
       id: doc.id,
       authorId: d['authorId'] ?? '',
@@ -137,6 +163,9 @@ class PostModel {
       authorPhotoUrl: d['authorPhotoUrl'],
       mediaUrls: List<String>.from(d['mediaUrls'] ?? []),
       mediaType: d['mediaType'] ?? 'text',
+      thumbnailUrl: d['thumbnailUrl'],
+      aspectRatio: (d['aspectRatio'] as num?)?.toDouble(),
+      durationMs: (d['durationMs'] as num?)?.toInt(),
       caption: d['caption'] ?? '',
       location: d['location'],
       likeCount: d['likeCount'] ?? 0,
@@ -145,15 +174,19 @@ class PostModel {
       reportCount: d['reportCount'] ?? 0,
       groupId: d['groupId'],
       createdAt: d['createdAt'] is DateTime ? d['createdAt'] : DateTime.now(),
+      editedAt: d['editedAt'] is DateTime ? d['editedAt'] as DateTime : null,
+      audience: d['audience'] as String? ?? 'Everyone',
     );
   }
 
   Map<String, dynamic> toFirestore() => {
     'authorId': authorId, 'authorName': authorName, 'authorPhotoUrl': authorPhotoUrl,
-    'mediaUrls': mediaUrls, 'mediaType': mediaType, 'caption': caption,
+    'mediaUrls': mediaUrls, 'mediaType': mediaType,
+    'thumbnailUrl': thumbnailUrl, 'aspectRatio': aspectRatio, 'durationMs': durationMs,
+    'caption': caption,
     'location': location, 'likeCount': likeCount, 'commentCount': commentCount,
     'isReported': isReported, 'reportCount': reportCount, 'groupId': groupId,
-    'createdAt': createdAt,
+    'createdAt': createdAt, 'editedAt': editedAt, 'audience': audience,
   };
 }
 
@@ -208,14 +241,59 @@ class ChatModel {
   final DateTime? lastMessageAt;
   final String createdBy;
   final Map<String, int> unreadCount;
+  final List<String> mutedBy;
   final DateTime createdAt;
+
+  /// uid -> display name, denormalised onto the chat doc when it's created so
+  /// the chat list can render a DM title without an extra read per row.
+  /// Empty on legacy docs written before this field existed.
+  final Map<String, String> participantNames;
 
   const ChatModel({
     required this.id, required this.type, required this.participants,
     this.groupName, this.groupPhotoUrl, this.lastMessage,
     this.lastMessageSenderId, this.lastMessageAt, required this.createdBy,
-    this.unreadCount = const {}, required this.createdAt,
+    this.unreadCount = const {}, this.mutedBy = const [], required this.createdAt,
+    this.participantNames = const {},
   });
+
+  /// Builds the [participantNames] map for a new DM. Blank names are omitted
+  /// so [displayNameFor] falls through to its default rather than rendering
+  /// an empty title.
+  static Map<String, String> namesMap({
+    required String meUid, required String? meName,
+    required String otherUid, required String? otherName,
+  }) => {
+    if (meName != null && meName.trim().isNotEmpty) meUid: meName.trim(),
+    if (otherName != null && otherName.trim().isNotEmpty) otherUid: otherName.trim(),
+  };
+
+  /// The person on the other side of this DM, as seen by [uid], or null when
+  /// there isn't exactly one well-defined answer: a group, a viewer who isn't
+  /// a participant, or a self-DM.
+  ///
+  /// Returning null rather than guessing matters because callers feed this to
+  /// blockUser and reportContent. A plain
+  /// `participants.firstWhere((p) => p != uid)` silently yields
+  /// participants.first when [uid] is absent, which would block or report an
+  /// uninvolved third party.
+  String? otherUidFor(String uid) {
+    if (type == 'group') return null;
+    if (!participants.contains(uid)) return null;
+    final others = participants.where((p) => p != uid);
+    return others.isEmpty ? null : others.first;
+  }
+
+  /// Title for this chat as seen by [uid]: the group name for a group, the
+  /// other participant's name for a DM.
+  String displayNameFor(String uid) {
+    if (type == 'group') return groupName ?? 'Group';
+    final otherUid = otherUidFor(uid);
+    if (otherUid == null) return 'User';
+    final name = participantNames[otherUid];
+    if (name != null && name.isNotEmpty) return name;
+    return groupName ?? 'User';
+  }
 
   factory ChatModel.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
@@ -232,7 +310,9 @@ class ChatModel {
       lastMessageAt: d['lastMessageAt'] is DateTime ? d['lastMessageAt'] : null,
       createdBy: d['createdBy'] ?? '',
       unreadCount: Map<String, int>.from(d['unreadCount'] ?? {}),
+      mutedBy: List<String>.from(d['mutedBy'] ?? []),
       createdAt: d['createdAt'] is DateTime ? d['createdAt'] : DateTime.now(),
+      participantNames: Map<String, String>.from(d['participantNames'] ?? {}),
     );
   }
 
@@ -240,7 +320,8 @@ class ChatModel {
     'type': type, 'participants': participants, 'groupName': groupName,
     'groupPhotoUrl': groupPhotoUrl, 'lastMessage': lastMessage,
     'lastMessageSenderId': lastMessageSenderId, 'lastMessageAt': lastMessageAt,
-    'createdBy': createdBy, 'unreadCount': unreadCount, 'createdAt': createdAt,
+    'createdBy': createdBy, 'unreadCount': unreadCount, 'mutedBy': mutedBy,
+    'createdAt': createdAt, 'participantNames': participantNames,
   };
 }
 
@@ -315,6 +396,15 @@ class EventModel {
     required this.createdAt,
   });
 
+  /// True if [date] is today or later. `time` is a free-text field (not a
+  /// reliable DateTime component), so today's events count as upcoming
+  /// regardless of what time it currently is.
+  bool get isUpcoming {
+    final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
+    return !date.isBefore(startOfToday);
+  }
+
   factory EventModel.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
     if (d['date'] is Timestamp) d['date'] = (d['date'] as Timestamp).toDate();
@@ -362,6 +452,7 @@ class GroupModel {
   final String? location;
   final bool isPinned;
   final String? chatId;
+  final bool chatEnabled;
   final DateTime createdAt;
 
   const GroupModel({
@@ -369,7 +460,7 @@ class GroupModel {
     this.imageUrl, required this.createdBy, this.members = const [],
     this.admins = const [], this.memberCount = 0, this.isPublic = true,
     this.tags = const [], this.location, this.isPinned = false,
-    this.chatId, required this.createdAt,
+    this.chatId, this.chatEnabled = true, required this.createdAt,
   });
 
   factory GroupModel.fromFirestore(DocumentSnapshot doc) {
@@ -389,6 +480,7 @@ class GroupModel {
       location: d['location'],
       isPinned: d['isPinned'] ?? false,
       chatId: d['chatId'],
+      chatEnabled: d['chatEnabled'] ?? true,
       createdAt: d['createdAt'] is DateTime ? d['createdAt'] : DateTime.now(),
     );
   }
@@ -398,7 +490,7 @@ class GroupModel {
     'createdBy': createdBy, 'members': members, 'admins': admins,
     'memberCount': memberCount, 'isPublic': isPublic, 'tags': tags,
     'location': location, 'isPinned': isPinned, 'chatId': chatId,
-    'createdAt': createdAt,
+    'chatEnabled': chatEnabled, 'createdAt': createdAt,
   };
 }
 
@@ -600,11 +692,22 @@ class SafeCheckModel {
   final DateTime createdAt;
   final DateTime? expiresAt;
 
+  /// Who may read this check-in: 'all', 'verified' or 'friends'. Denormalised
+  /// from the author's SafeCheck Visibility setting at write time because
+  /// firestore.rules enforces it per document — see H18. Defaults to 'all' so
+  /// a legacy document is never mis-parsed as more private than it was.
+  final String visibility;
+
+  /// Audience for `visibility == 'friends'`: the author's follower uids,
+  /// captured at write time. Staleness is bounded by the 24h expiry.
+  final List<String> visibleTo;
+
   const SafeCheckModel({
     required this.id, required this.userId, required this.userName,
     this.userPhotoUrl, required this.status, this.message,
     required this.city, this.lat, this.lng,
     required this.createdAt, this.expiresAt,
+    this.visibility = 'all', this.visibleTo = const [],
   });
 
   bool get isActive => expiresAt == null || expiresAt!.isAfter(DateTime.now());
@@ -616,12 +719,15 @@ class SafeCheckModel {
     lat: (d['lat'] as num?)?.toDouble(), lng: (d['lng'] as num?)?.toDouble(),
     createdAt: d['createdAt'] is DateTime ? d['createdAt'] : DateTime.now(),
     expiresAt: d['expiresAt'] is DateTime ? d['expiresAt'] : null,
+    visibility: d['visibility'] as String? ?? 'all',
+    visibleTo: List<String>.from(d['visibleTo'] ?? const []),
   );
 
   Map<String, dynamic> toMap() => {
     'userId': userId, 'userName': userName, 'userPhotoUrl': userPhotoUrl,
     'status': status, 'message': message, 'city': city,
     'lat': lat, 'lng': lng, 'createdAt': createdAt, 'expiresAt': expiresAt,
+    'visibility': visibility, 'visibleTo': visibleTo,
   };
 
   factory SafeCheckModel.fromFirestore(DocumentSnapshot doc) {

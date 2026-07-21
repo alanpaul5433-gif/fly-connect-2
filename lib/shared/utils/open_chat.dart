@@ -45,6 +45,12 @@ class OpenChat {
       }
       final params = <String, String>{
         'name': otherName.trim().isEmpty ? 'Chat' : otherName,
+        // H11: without this the conversation screen falls back to
+        // `otherUid ?? chatId`, so Block/Report from a match, profile or
+        // nearby chat wrote users/{me}/blocked/{chatDocId} — a document id
+        // that is not a user. The block succeeded, the snackbar appeared, and
+        // nobody was blocked.
+        'otherUid': otherUid,
         if (otherPhotoUrl != null && otherPhotoUrl.isNotEmpty)
           'photo': otherPhotoUrl,
       };

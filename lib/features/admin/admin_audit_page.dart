@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../core/constants/app_colors.dart';
 
 class AdminAuditPage extends StatefulWidget {
@@ -153,6 +155,35 @@ class _AdminAuditPageState extends State<AdminAuditPage> {
     return '${d.day}/${d.month}/${d.year} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
+  String _csvField(dynamic value) {
+    final s = value?.toString() ?? '';
+    if (s.contains(',') || s.contains('"') || s.contains('\n')) {
+      return '"${s.replaceAll('"', '""')}"';
+    }
+    return s;
+  }
+
+  /// Exports the currently-filtered (loaded-page) entries as a CSV file
+  /// via the native share sheet (M-7 — this button was previously a no-op).
+  Future<void> _exportCsv(List<Map<String, dynamic>> entries) async {
+    final rows = <String>[
+      'Timestamp,Admin,Action,Target Type,Target ID,Details,IP Address',
+      ...entries.map((e) {
+        final ts = e['timestamp'];
+        final iso = ts is Timestamp ? ts.toDate().toIso8601String() : '';
+        return [
+          iso, e['adminName'], e['action'], e['targetType'],
+          e['targetId'], e['details'], e['ipAddress'],
+        ].map(_csvField).join(',');
+      }),
+    ];
+    final bytes = utf8.encode(rows.join('\r\n'));
+    await SharePlus.instance.share(ShareParams(
+      files: [XFile.fromData(bytes, mimeType: 'text/csv', name: 'audit_log.csv')],
+      subject: 'FlyConnect audit log export',
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -194,7 +225,7 @@ class _AdminAuditPageState extends State<AdminAuditPage> {
                 width: 110,
                 height: 32,
                 child: ElevatedButton.icon(
-                  onPressed: () {},
+                  onPressed: filtered.isEmpty ? null : () => _exportCsv(filtered),
                   icon: const Icon(Icons.download, size: 14),
                   label: const Text('Export CSV'),
                   style: ElevatedButton.styleFrom(

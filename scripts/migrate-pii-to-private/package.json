@@ -1,0 +1,13 @@
+{
+  "name": "migrate-pii-to-private",
+  "private": true,
+  "version": "1.0.0",
+  "description": "One-time script for QA finding H-2: move email/phone/fcmToken/dob off the readable users/{uid} doc into an owner-only private/data subdoc.",
+  "main": "migrate-pii-to-private.js",
+  "scripts": {
+    "migrate": "node migrate-pii-to-private.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.1.0"
+  }
+}

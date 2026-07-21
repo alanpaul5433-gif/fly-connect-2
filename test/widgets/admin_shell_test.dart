@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -7,10 +6,10 @@ void main() {
   // so instead we lock down the expected sidebar navigation by mirroring
   // the static _navItems list. If a developer adds or renames an admin
   // page, this test reminds them to also update the sidebar + this list.
-  test('Admin sidebar has the expected 12 nav items', () {
+  test('Admin sidebar has the expected 13 nav items', () {
     const expected = [
       'Dashboard', 'Users', 'Reports', 'Content', 'SafeCheck',
-      'Events', 'Promotions', 'Businesses', 'GDPR', 'Audit Log',
+      'Nearby', 'Events', 'Promotions', 'Businesses', 'GDPR', 'Audit Log',
       'Analytics', 'Notifications',
     ];
     // Manually transcribed from lib/features/admin/admin_shell.dart
@@ -19,17 +18,17 @@ void main() {
     // sidebar will silently show the old set.
     const inShell = [
       'Dashboard', 'Users', 'Reports', 'Content', 'SafeCheck',
-      'Events', 'Promotions', 'Businesses', 'GDPR', 'Audit Log',
+      'Nearby', 'Events', 'Promotions', 'Businesses', 'GDPR', 'Audit Log',
       'Analytics', 'Notifications',
     ];
     expect(inShell, expected);
-    expect(inShell.length, 12);
+    expect(inShell.length, 13);
   });
 
   test('Admin route paths follow the /admin/* convention', () {
     const adminRoutes = [
       '/admin/dashboard', '/admin/users', '/admin/reports',
-      '/admin/content', '/admin/safecheck', '/admin/events',
+      '/admin/content', '/admin/safecheck', '/admin/nearby', '/admin/events',
       '/admin/promotions', '/admin/business-verify', '/admin/gdpr',
       '/admin/audit', '/admin/analytics', '/admin/notifications',
     ];

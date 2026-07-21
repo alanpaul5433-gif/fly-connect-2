@@ -16,16 +16,16 @@ class FirebaseConfig {
   /// Android client app ID: `mobilesdk_app_id` in `android/app/google-services.json`
   /// after you register package [androidPackageName] in Firebase Console.
   /// Native Analytics / Crashlytics need this (Web `app_id` causes 404 / missing google_app_id).
-  static const String androidAppId = '';
+  static const String androidAppId = '1:361504801284:android:7b9682e73d98c7fbc0ab51';
 
   /// iOS client app ID: `GOOGLE_APP_ID` in `GoogleService-Info.plist`.
-  static const String iosAppId = '';
+  static const String iosAppId = '1:361504801284:ios:8a69029e723e238dc0ab51';
 
   // ── App config ─────────────────────────────────────────────
   // Canonical bundle ID used across google-services.json, AndroidManifest,
   // and iOS Info.plist. Must stay in sync with Firebase Console.
-  static const String androidPackageName = 'com.appcurb.flyconnect';
-  static const String iosBundleId = 'com.appcurb.flyconnect';
+  static const String androidPackageName = 'com.urbansyncinnovations.flyconnect';
+  static const String iosBundleId = 'com.urbansyncinnovations.flyconnect';
 
   // ── Deep link scheme ───────────────────────────────────────
   static const String deepLinkScheme = 'flyconnect';

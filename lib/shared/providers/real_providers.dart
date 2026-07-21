@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -10,6 +11,11 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:crypto/crypto.dart';
+import '../utils/account_deletion.dart';
+import '../utils/block_list.dart';
+import '../utils/chat_logic.dart';
+import '../utils/match_logic.dart';
+import '../utils/user_posts.dart';
 import '../utils/image_compress.dart';
 import '../utils/report_rate_limiter.dart';
 import '../models/models.dart';
@@ -21,13 +27,19 @@ const _mockCredentials = {
   'sarah@flyconnect.com':   ('sarah123',   'user'),
   'business@flyconnect.com':('business123','business'),
   'emirates@flyconnect.com':('emirates123','business'),
+  // Unverified business — exercises the "pending verification" create-gate
+  // (create_promotion_screen.dart, create_event_screen.dart,
+  // create_group_screen.dart); the other two mock business accounts are
+  // both verified, so there was previously no way to test this path without
+  // hitting real Firebase.
+  'newbiz@flyconnect.com':  ('newbiz123',  'business'),
 };
 
 UserModel _mockUserModelFor(String email, String role) {
   switch (email) {
     case 'sarah@flyconnect.com':
       return UserModel(
-        uid: 'mock_sarah', name: 'Sarah Mitchell', email: email,
+        uid: 'user_007', name: 'Sarah Mitchell', email: email,
         airline: 'British Airways', position: 'Flight Attendant',
         airport: 'LHR', city: 'London', state: 'England',
         bio: 'Cabin crew with a passion for discovering hidden gems 🌍',
@@ -41,7 +53,7 @@ UserModel _mockUserModelFor(String email, String role) {
       );
     case 'business@flyconnect.com':
       return UserModel(
-        uid: 'mock_biz1', name: 'Sky Lounge NYC', email: email,
+        uid: 'biz_001', name: 'Sky Lounge NYC', email: email,
         role: 'business', position: 'Airport Lounge', airport: 'JFK',
         city: 'New York', state: 'NY',
         bio: 'Premium airport lounge at JFK Terminal 4.',
@@ -52,7 +64,7 @@ UserModel _mockUserModelFor(String email, String role) {
       );
     case 'emirates@flyconnect.com':
       return UserModel(
-        uid: 'mock_biz2', name: 'Emirates Business Lounge', email: email,
+        uid: 'biz_002', name: 'Emirates Business Lounge', email: email,
         role: 'business', position: 'Airlines', airport: 'DXB',
         city: 'Dubai', state: 'Dubai',
         bio: 'Official Emirates lounge at Dubai International.',
@@ -63,7 +75,7 @@ UserModel _mockUserModelFor(String email, String role) {
       );
     default: // user@flyconnect.com and any other email
       return UserModel(
-        uid: 'mock_alex', name: 'Alex Johnson', email: email,
+        uid: 'user_001', name: 'Alex Johnson', email: email,
         airline: 'Delta Air Lines', position: 'Pilot',
         airport: 'JFK', city: 'New York', state: 'NY',
         bio: 'Senior pilot with 12 years of experience ✈️',
@@ -78,10 +90,28 @@ UserModel _mockUserModelFor(String email, String role) {
   }
 }
 
+/// Fetches `users/{uid}` plus its owner-only `private/data` subdoc (email,
+/// phone, fcmToken) and merges them into one [UserModel] — only valid for the
+/// SIGNED-IN user's own uid, since `private/data` is owner-read-only. Fetching
+/// another user's uid here would just have the private read silently return
+/// nothing (not an error) and behave like a plain doc fetch.
+Future<UserModel?> _fetchSelfWithPrivate(FirebaseFirestore db, String uid) async {
+  final doc = await db.collection('users').doc(uid).get();
+  if (!doc.exists) return null;
+  final data = Map<String, dynamic>.from(doc.data()!);
+  final privateDoc =
+      await db.collection('users').doc(uid).collection('private').doc('data').get();
+  if (privateDoc.exists) data.addAll(privateDoc.data()!);
+  // Same Timestamp handling as UserModel.fromFirestore.
+  if (data['createdAt'] is Timestamp) data['createdAt'] = (data['createdAt'] as Timestamp).toDate();
+  if (data['lastSeen'] is Timestamp) data['lastSeen'] = (data['lastSeen'] as Timestamp).toDate();
+  return UserModel.fromMap(data, uid);
+}
+
 // ─── Real Auth Provider ──────────────────────────────────────
 class AuthProvider extends ChangeNotifier {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseAuth _auth;
+  final FirebaseFirestore _db;
   UserModel? _currentUser;
   bool _loading = false;
   String? _error;
@@ -96,23 +126,43 @@ class AuthProvider extends ChangeNotifier {
   bool get isLoggedIn => isMock ? _currentUser != null : _auth.currentUser != null;
   String get userRole => _currentUser?.role ?? 'user';
 
-  AuthProvider({this.isMock = false}) {
+  StreamSubscription<User?>? _authSub;
+
+  // Completes once the first authStateChanges event has been fully handled
+  // (including the Firestore role fetch for a logged-in user). SplashScreen
+  // awaits this before reading userRole so it doesn't route on the 'user'
+  // default while _fetchUser is still in flight.
+  final Completer<void> _authReadyCompleter = Completer<void>();
+  Future<void> get authReady => _authReadyCompleter.future;
+
+  AuthProvider({this.isMock = false, FirebaseFirestore? db, FirebaseAuth? auth})
+      : _db = db ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance {
     if (!isMock) {
-      _auth.authStateChanges().listen((user) async {
+      _authSub = _auth.authStateChanges().listen((user) async {
         if (user != null) {
           await _fetchUser(user.uid);
         } else {
           _currentUser = null;
         }
+        if (!_authReadyCompleter.isCompleted) _authReadyCompleter.complete();
         notifyListeners();
       });
+    } else {
+      _authReadyCompleter.complete();
     }
   }
 
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
+  }
+
   Future<void> _fetchUser(String uid) async {
-    final doc = await _db.collection('users').doc(uid).get();
-    if (doc.exists) {
-      _currentUser = UserModel.fromFirestore(doc);
+    final user = await _fetchSelfWithPrivate(_db, uid);
+    if (user != null) {
+      _currentUser = user;
     }
   }
 
@@ -170,7 +220,7 @@ class AuthProvider extends ChangeNotifier {
     required String name, required String email, required String password,
     String? phone, String? airline, String? airport, String? position,
     String? city, String? state, String role = 'user', String? bio,
-    DateTime? dob,
+    DateTime? dob, String? ein, String? licenseNumber,
   }) async {
     _loading = true; _error = null; notifyListeners();
 
@@ -198,17 +248,32 @@ class AuthProvider extends ChangeNotifier {
         createdAt: DateTime.now(),
         hobbies: [], passportStamps: [], travelHistory: [],
       );
-      // Persist user doc plus DOB / consent metadata for compliance
-      // (Apple 5.1.1, Play Families policy, GDPR Article 8 / COPPA).
-      // DOB is not on UserModel because most code shouldn't need it —
-      // we store it as an extra field for audit + future age verification.
-      final docData = user.toFirestore();
-      if (dob != null) {
-        docData['dob'] = Timestamp.fromDate(dob);
-        docData['ageVerifiedAt'] = FieldValue.serverTimestamp();
-      }
+      // email/phone/dob are PII and go to the owner-only `private/data`
+      // subdoc, not the main doc (any authed user can read `users/{uid}` —
+      // see firestore.rules and H-2 in docs/QA_AUDIT_REPORT.md). DOB is not
+      // on UserModel because most code shouldn't need it — it's stored as an
+      // extra field for audit + future age verification (Apple 5.1.1, Play
+      // Families policy, GDPR Article 8 / COPPA). ein/licenseNumber follow
+      // the same pattern for the same reason — see the business-verification
+      // signup design doc.
+      final docData = user.toFirestore()..remove('email')..remove('phone');
       docData['termsAcceptedAt'] = FieldValue.serverTimestamp();
+      if (role == 'business') {
+        docData['verificationStatus'] = 'pending';
+      }
       await _db.collection('users').doc(user.uid).set(docData);
+
+      final privateData = <String, dynamic>{'email': email, 'phone': phone};
+      if (dob != null) {
+        privateData['dob'] = Timestamp.fromDate(dob);
+        privateData['ageVerifiedAt'] = FieldValue.serverTimestamp();
+      }
+      if (ein != null && ein.isNotEmpty) privateData['ein'] = ein;
+      if (licenseNumber != null && licenseNumber.isNotEmpty) {
+        privateData['licenseNumber'] = licenseNumber;
+      }
+      await _db.collection('users').doc(user.uid)
+          .collection('private').doc('data').set(privateData);
       _currentUser = user;
       _loading = false; notifyListeners();
       return true;
@@ -232,16 +297,20 @@ class AuthProvider extends ChangeNotifier {
   /// Required by Google Play Store (since May 2024) and Apple App Store.
   ///
   /// Steps:
-  /// 1. Delete the top-level user doc `users/{uid}`
-  /// 2. Delete first-party subcollections under that user (savedPosts, blocked, following, followers, trips)
-  /// 3. Mark the user's posts as deleted (soft-delete) \u2014 we don't cascade-delete
-  ///    other users' replies/likes automatically; those are handled by a Cloud
-  ///    Function on the `users/{uid}` delete trigger in production.
-  /// 4. Sign the user out of Google / Apple
-  /// 5. Call `FirebaseAuth.currentUser!.delete()` \u2014 requires a recent login
+  /// 1. Verify the sign-in is recent enough for `user.delete()` to succeed \u2014
+  ///    BEFORE erasing anything (see below)
+  /// 2. Erase Firestore data via [purgeUserData], user doc last
+  /// 3. Sign the user out of Google / Apple
+  /// 4. Call `FirebaseAuth.currentUser!.delete()`
   ///
-  /// Returns `true` on success. On `requires-recent-login`, sets `_error`
-  /// and returns `false` so the caller can prompt the user to re-authenticate.
+  /// Ordering is the point. The original deleted `users/{uid}` first and called
+  /// `user.delete()` last, so the common `requires-recent-login` failure left
+  /// the profile destroyed and the Auth account alive \u2014 a signed-in user with
+  /// no profile document and no way back. The freshness pre-flight now fails
+  /// the operation before anything is erased.
+  ///
+  /// Returns `true` on success. On a stale session, sets `_error` and returns
+  /// `false` having changed nothing.
   Future<bool> deleteAccount() async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -250,38 +319,30 @@ class AuthProvider extends ChangeNotifier {
       return false;
     }
     final uid = user.uid;
+
+    // 1. Pre-flight. Firebase rejects delete() on a session older than a few
+    // minutes. Checking first keeps a doomed call from destroying data.
+    final lastSignIn = user.metadata.lastSignInTime;
+    if (lastSignIn == null ||
+        DateTime.now().difference(lastSignIn) > _recentLoginWindow) {
+      _error = 'For your security, please sign out and sign in again, '
+          'then delete your account. Nothing has been deleted.';
+      notifyListeners();
+      return false;
+    }
+
     _loading = true; _error = null; notifyListeners();
 
     try {
-      // 1. Wipe the user doc
-      await _db.collection('users').doc(uid).delete();
+      // 2. Erase Firestore data (user doc last \u2014 see purgeUserData).
+      await purgeUserData(_db, uid);
 
-      // 2. Wipe known subcollections (Firestore requires individual doc deletes)
-      await _deleteSubcollection(_db.collection('users').doc(uid).collection('savedPosts'));
-      await _deleteSubcollection(_db.collection('users').doc(uid).collection('blocked'));
-      await _deleteSubcollection(_db.collection('users').doc(uid).collection('following'));
-      await _deleteSubcollection(_db.collection('users').doc(uid).collection('followers'));
-      await _deleteSubcollection(_db.collection('users').doc(uid).collection('trips'));
-
-      // 3. Soft-delete user's posts (anonymize author)
-      final postSnap = await _db.collection('posts')
-          .where('authorId', isEqualTo: uid).get();
-      final batch = _db.batch();
-      for (final doc in postSnap.docs) {
-        batch.update(doc.reference, {
-          'authorName': '[deleted user]',
-          'authorPhotoUrl': null,
-          'isDeleted': true,
-        });
-      }
-      await batch.commit();
-
-      // 4. Sign out of Google (native only)
+      // 3. Sign out of Google (native only)
       if (!kIsWeb) {
         try { await GoogleSignIn().signOut(); } catch (_) {}
       }
 
-      // 5. Delete the Firebase Auth user
+      // 4. Delete the Firebase Auth user
       await user.delete();
 
       _currentUser = null;
@@ -289,7 +350,11 @@ class AuthProvider extends ChangeNotifier {
       return true;
     } on FirebaseAuthException catch (e) {
       if (e.code == 'requires-recent-login') {
-        _error = 'Please sign out and sign in again, then try deleting your account.';
+        // Should be unreachable thanks to the pre-flight, but a session can
+        // still age out mid-operation. The data is already gone at this point,
+        // so say so rather than implying a clean retry.
+        _error = 'Your data was removed, but the sign-in could not be deleted. '
+            'Sign in again and retry to finish removing your account.';
       } else {
         _error = e.message ?? 'Could not delete account.';
       }
@@ -302,23 +367,12 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> _deleteSubcollection(CollectionReference ref) async {
-    try {
-      final snap = await ref.limit(500).get();
-      if (snap.docs.isEmpty) return;
-      final batch = _db.batch();
-      for (final doc in snap.docs) {
-        batch.delete(doc.reference);
-      }
-      await batch.commit();
-      // Recurse if there were exactly 500 docs (Firestore batch max)
-      if (snap.docs.length == 500) {
-        await _deleteSubcollection(ref);
-      }
-    } catch (_) {
-      // Non-fatal \u2014 continue deletion of other subcollections
-    }
-  }
+  /// How recent a sign-in must be for `user.delete()` to be accepted. Firebase
+  /// does not document an exact figure; 5 minutes is the widely used value and
+  /// errs toward asking the user to re-authenticate rather than toward
+  /// destroying data on a call that will be refused.
+  static const Duration _recentLoginWindow = Duration(minutes: 5);
+
 
   Future<bool> resetPassword(String email) async {
     _loading = true; _error = null; notifyListeners();
@@ -404,8 +458,17 @@ class AuthProvider extends ChangeNotifier {
   }
 
   // ── Apple Sign-In ──────────────────────────────────────────
-  // iOS native: requires "Sign in with Apple" capability in Xcode.
-  // Web/Android: requires Apple Service ID + Firebase provider config.
+  // iOS native: uses the bundle id as the client (no Services ID needed).
+  // Web/Android: use Apple's web OAuth flow via the Services ID below.
+  //
+  // NOTE: this Services ID must exist in the Apple Developer portal
+  // (Identifiers → Services IDs) with "Sign in with Apple" configured for
+  // primary App ID com.urbansyncinnovations.flyconnect and the redirect URL
+  // below registered as a Return URL. It is NOT the bundle id.
+  static const _appleServicesId = 'com.urbansyncinnovations.flyconnect.signin';
+  static const _appleRedirectUri =
+      'https://flyconnect-ab4f2.firebaseapp.com/__/auth/handler';
+
   Future<bool> signInWithApple({String role = 'user'}) async {
     _loading = true; _error = null; notifyListeners();
     try {
@@ -426,7 +489,41 @@ class AuthProvider extends ChangeNotifier {
             AppleIDAuthorizationScopes.fullName,
           ],
           nonce: nonce,
+          // Android has no native Apple SDK — it must use Apple's web OAuth
+          // flow, which needs the Services ID as the client + the Firebase
+          // callback as the return URL. iOS uses the native sheet and ignores
+          // this, so only pass it on Android.
+          webAuthenticationOptions:
+              defaultTargetPlatform == TargetPlatform.android
+                  ? WebAuthenticationOptions(
+                      clientId: _appleServicesId,
+                      redirectUri: Uri.parse(_appleRedirectUri),
+                    )
+                  : null,
         );
+
+        // ── Diagnostic (Phase 1 evidence) ──────────────────────────
+        // Decode the Apple idToken to see the exact claims Firebase validates:
+        //   aud  must == our bundle id (com.urbansyncinnovations.flyconnect)
+        //   iss  must == https://appleid.apple.com
+        //   nonce claim must == sha256(rawNonce)
+        //   exp  must be in the future
+        // Whichever is wrong is why Firebase returns invalid-credential.
+        assert(() {
+          final tok = appleCredential.identityToken;
+          debugPrint('[AppleSignIn] identityToken present: ${tok != null} '
+              '(len=${tok?.length ?? 0}); '
+              'authCode present: ${appleCredential.authorizationCode.isNotEmpty}; '
+              'rawNonce len: ${rawNonce.length}');
+          if (tok != null) {
+            final c = _decodeJwtPayload(tok);
+            debugPrint('[AppleSignIn] claims: aud=${c['aud']} iss=${c['iss']} '
+                'sub=${c['sub']} exp=${c['exp']} '
+                'nonceClaim=${c['nonce']} '
+                'nonce==sha256(raw)? ${c['nonce'] == _sha256(rawNonce)}');
+          }
+          return true;
+        }());
 
         final oauthCredential = OAuthProvider('apple.com').credential(
           idToken: appleCredential.identityToken,
@@ -456,7 +553,13 @@ class AuthProvider extends ChangeNotifier {
       _loading = false; notifyListeners();
       return false;
     } on FirebaseAuthException catch (e) {
-      _error = e.message ?? 'Apple sign-in failed';
+      // The CODE is the diagnostic field; the message is generic.
+      assert(() {
+        debugPrint('[AppleSignIn] FirebaseAuthException '
+            'code=${e.code} message=${e.message}');
+        return true;
+      }());
+      _error = _describeAppleAuthError(e.code) ?? e.message ?? 'Apple sign-in failed';
       _loading = false; notifyListeners();
       return false;
     } catch (e) {
@@ -490,7 +593,11 @@ class AuthProvider extends ChangeNotifier {
       passportStamps: [],
       travelHistory: [],
     );
-    await ref.set(newUser.toFirestore());
+    final docData = newUser.toFirestore();
+    if (role == 'business') {
+      docData['verificationStatus'] = 'pending';
+    }
+    await ref.set(docData);
     _currentUser = newUser;
   }
 
@@ -507,19 +614,48 @@ class AuthProvider extends ChangeNotifier {
     final bytes = utf8.encode(input);
     return sha256.convert(bytes).toString();
   }
+
+  // Decode a JWT payload (base64url) — diagnostics only, no verification.
+  Map<String, dynamic> _decodeJwtPayload(String jwt) {
+    final parts = jwt.split('.');
+    if (parts.length != 3) return const {};
+    var p = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+    p = p.padRight(p.length + ((4 - p.length % 4) % 4), '=');
+    try {
+      return json.decode(utf8.decode(base64.decode(p))) as Map<String, dynamic>;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  // ── Map a FirebaseAuthException.code to an actionable Apple message ──
+  // TODO(you): translate the raw code into guidance. This is a real UX /
+  // diagnostics decision — what does the END USER see vs. what helps YOU
+  // debug? Codes worth handling:
+  //   • 'operation-not-allowed' → Apple provider is OFF in Firebase Console
+  //   • 'invalid-credential'    → nonce / token mismatch or expired token
+  //   • 'internal-error'        → Apple Developer App ID "Sign In with Apple"
+  //                               capability / grouping (carries the
+  //                               "Invalid OAuth response from apple.com" text)
+  // Return a string to override the generic message, or null to fall back.
+  String? _describeAppleAuthError(String code) {
+    // TODO: implement the mapping (5-10 lines).
+    return null;
+  }
 }
 
 // ─── Real User Provider ──────────────────────────────────────
 class UserProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
   UserModel? _currentUser;
   final Set<String> _following = {};
 
   UserModel? get currentUser => _currentUser;
   bool get loading => false;
 
-  UserProvider({this.isMock = false}) {
+  UserProvider({this.isMock = false, FirebaseFirestore? db})
+      : _db = db ?? FirebaseFirestore.instance {
     if (isMock) _following.addAll({'user_002', 'user_006'});
   }
 
@@ -545,11 +681,94 @@ class UserProvider extends ChangeNotifier {
     if (isMock) { await Future.delayed(const Duration(milliseconds: 300)); notifyListeners(); return; }
     await _db.collection('users').doc(uid).update(data);
     if (_currentUser != null && uid == _currentUser!.uid) {
-      final doc = await _db.collection('users').doc(uid).get();
-      if (doc.exists) _currentUser = UserModel.fromFirestore(doc);
+      final user = await _fetchSelfWithPrivate(_db, uid);
+      if (user != null) _currentUser = user;
     }
     notifyListeners();
   }
+
+  /// Upload a profile avatar and return its download URL (null in mock / when
+  /// signed out). Stored at `profile_photos/{uid}/avatar.png` — the two-segment
+  /// path matches the `profile_photos/{uid}/{file=**}` rule in storage.rules so
+  /// `isOwner(uid)` resolves to the real uid (a single-segment `{uid}.png` path
+  /// would capture the extension into {uid} and fail the owner check). Errors
+  /// propagate so the caller can surface them instead of silently dropping the
+  /// photo. Mirrors [PostProvider.uploadPostImage].
+  Future<String?> uploadProfilePhoto(Uint8List bytes) async {
+    if (isMock) return null;
+    final uid = _currentUser?.uid;
+    if (uid == null) return null;
+    final compressed = await compressForUpload(bytes, maxDimension: 1024);
+    final ref = FirebaseStorage.instance.ref('profile_photos/$uid/avatar.png');
+    await ref.putData(compressed, SettableMetadata(contentType: 'image/png'));
+    return await ref.getDownloadURL();
+  }
+
+  /// Stories (M-6: was RAM-only via a `StoryState` singleton — lost on app
+  /// restart, and never visible to anyone else since nothing ever read it
+  /// back). Deliberately "mine-only": one current-story doc per user, no
+  /// expiry/viewer-tracking/multi-user feed — a real stories feed is a much
+  /// bigger, separate feature. Mirrors [uploadProfilePhoto]'s storage-path
+  /// convention.
+  Future<String?> getMyStory(String uid) async {
+    if (isMock) return null;
+    final doc = await _db.collection('stories').doc(uid).get();
+    return doc.data()?['imageUrl'] as String?;
+  }
+
+  Future<String?> postStory(Uint8List bytes) async {
+    if (isMock) return null;
+    final uid = _currentUser?.uid;
+    if (uid == null) return null;
+    final compressed = await compressForUpload(bytes, maxDimension: 1080);
+    final ref = FirebaseStorage.instance
+        .ref('user_uploads/$uid/stories/${DateTime.now().millisecondsSinceEpoch}.jpg');
+    await ref.putData(compressed, SettableMetadata(contentType: 'image/jpeg'));
+    final url = await ref.getDownloadURL();
+    await _db.collection('stories').doc(uid).set({
+      'imageUrl': url,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    return url;
+  }
+
+  Future<void> removeStory(String uid) async {
+    if (isMock) return;
+    final ref = _db.collection('stories').doc(uid);
+    final url = (await ref.get()).data()?['imageUrl'] as String?;
+    await ref.delete();
+    // Best-effort — mirrors deletePost's swallow-and-continue storage cleanup.
+    if (url != null) {
+      try {
+        await FirebaseStorage.instance.refFromURL(url).delete();
+      } catch (_) {}
+    }
+  }
+
+  /// Match preferences live under users/{uid}.matchPrefs (a nested map) so they
+  /// sync across devices. The `matchPrefs` key is whitelisted in firestore.rules.
+  Future<Map<String, dynamic>> getMatchPrefs(String uid) async {
+    if (isMock) return {};
+    final doc = await _db.collection('users').doc(uid).get();
+    return (doc.data()?['matchPrefs'] as Map<String, dynamic>?) ?? {};
+  }
+
+  Future<void> saveMatchPrefs(String uid, Map<String, dynamic> prefs) =>
+      updateProfile(uid, {'matchPrefs': prefs});
+
+  /// Notification + privacy toggles from the Settings screen, stored as a raw
+  /// map under `users/{uid}.settings` — same shape as [saveMatchPrefs].
+  Future<void> saveSettings(String uid, Map<String, dynamic> settings) =>
+      updateProfile(uid, {'settings': settings});
+
+  /// Persists the viewer's own current position so other users' Nearby
+  /// queries can compute a real distance to them. Callers are responsible
+  /// for the privacy gating (only call this when 'shareLocation' is on, and
+  /// pass an already-fuzzed coordinate when 'approxLocationOnly' is on) —
+  /// see nearby_users_screen.dart. This method is a pure "write these two
+  /// numbers" call, same shape as [saveSettings].
+  Future<void> updateMyLocation(String uid, double lat, double lng) =>
+      updateProfile(uid, {'lat': lat, 'lng': lng});
 
   Future<void> followUser(String targetUid) async {
     if (isMock) { _following.add(targetUid); notifyListeners(); return; }
@@ -591,17 +810,22 @@ class UserProvider extends ChangeNotifier {
 // ─── Real Post Provider ──────────────────────────────────────
 class PostProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _db;
+  final FirebaseAuth _auth;
   List<PostModel> _feed = [];
   final Set<String> _liked = {};
   final Set<String> _saved = {};
-  bool _loading = false;
+  final bool _loading = false;
   String? _feedError;
   AuthProvider? _storedAuth;
 
   bool get loading => _loading;
   List<PostModel> get feed => _feed;
+
+  /// Post ids the signed-in user has liked (as tracked this session +
+  /// resolved via [isLiked]). Backs the profile "Liked" grid so it shows
+  /// only liked posts instead of the whole feed.
+  Set<String> get likedPostIds => _liked;
 
   /// Non-null when the feed stream has reported a failure. Cleared on
   /// every successful re-subscribe via [listenFeed].
@@ -610,7 +834,9 @@ class PostProvider extends ChangeNotifier {
   String? get _uid => isMock ? (_storedAuth?.currentUser?.uid ?? 'user_001') : _auth.currentUser?.uid;
   StreamSubscription? _feedSub;
 
-  PostProvider({this.isMock = false}) {
+  PostProvider({this.isMock = false, FirebaseFirestore? db, FirebaseAuth? auth})
+      : _db = db ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance {
     if (isMock) {
       _feed = List.from(mockPosts);
       _liked.add('post_003');
@@ -635,7 +861,34 @@ class PostProvider extends ChangeNotifier {
   bool get feedHasMore => _feedHasMore;
   bool get feedLoadingMore => _feedLoadingMore;
 
-  void listenFeed() {
+  /// Uids whose posts must never reach this viewer — people they blocked and
+  /// people who blocked them. Applied client-side because Firestore can't
+  /// express it: `not-in` caps at 10 and won't combine with the feed ordering.
+  Set<String> _blockedUids = {};
+  /// False until the block list has been read at least once. The feed refuses
+  /// to render while this is false rather than showing unfiltered content.
+  bool _blockedReady = false;
+
+  Future<void> _loadBlocked() async {
+    final uid = _uid;
+    if (uid == null) {
+      _blockedUids = {};
+      _blockedReady = true;
+      return;
+    }
+    try {
+      _blockedUids = await fetchBlockedUids(_db, uid);
+      _blockedReady = true;
+    } catch (_) {
+      // Keep whatever set we already had: a transient failure must not
+      // resurrect blocked content. If we have never loaded one, _blockedReady
+      // stays false and listenFeed reports an error instead of rendering an
+      // unfiltered feed — failing closed, since the alternative is showing a
+      // user the exact person they blocked.
+    }
+  }
+
+  Future<void> listenFeed() async {
     if (isMock) { _feed = List.from(mockPosts); notifyListeners(); return; }
     _feedSub?.cancel();
     _feedLimit = _feedPageSize;
@@ -644,19 +897,37 @@ class PostProvider extends ChangeNotifier {
     // user taps Retry; if the new subscription also fails, onError below
     // will set it again.
     _feedError = null;
+
+    await _loadBlocked();
+    if (!_blockedReady) {
+      _feedError = 'Could not load the feed.';
+      notifyListeners();
+      return;
+    }
     _resubscribeFeed();
   }
 
   void _resubscribeFeed() {
     _feedSub?.cancel();
+    // The audience filter is REQUIRED, not an optimisation: firestore.rules
+    // only admits a posts query that is provably limited to public posts, and
+    // Firestore rejects the whole query otherwise. Dropping this `where` makes
+    // the feed fail with permission-denied rather than over-fetch.
     _feedSub = _db.collection('posts')
+        .where('audience', isEqualTo: 'Everyone')
         .orderBy('createdAt', descending: true)
         .limit(_feedLimit)
         .snapshots()
         .listen((snap) {
-      _feed = snap.docs.map((d) => PostModel.fromFirestore(d)).toList();
-      // If we got fewer than the limit, there's nothing more to fetch.
-      _feedHasMore = _feed.length >= _feedLimit;
+      _feed = withoutBlocked(
+        snap.docs.map((d) => PostModel.fromFirestore(d)).toList(),
+        _blockedUids,
+        (p) => p.authorId,
+      );
+      // Measured on the RAW page, not the filtered list: blocked posts still
+      // consumed slots in the query, so a full page that filters down to three
+      // items still has more behind it.
+      _feedHasMore = snap.docs.length >= _feedLimit;
       _feedLoadingMore = false;
       // Successful snapshot clears any prior error.
       if (_feedError != null) _feedError = null;
@@ -681,7 +952,7 @@ class PostProvider extends ChangeNotifier {
     // _feedLoadingMore flips back to false in the snapshot callback above.
   }
 
-  Future<void> likePost(String postId) async {
+  Future<void> likePost(String postId, {required String postAuthorId}) async {
     _liked.add(postId);
     if (isMock) {
       final i = _feed.indexWhere((p) => p.id == postId);
@@ -695,9 +966,14 @@ class PostProvider extends ChangeNotifier {
       notifyListeners(); return;
     }
     if (_uid == null) return;
-    await _db.collection('posts').doc(postId).collection('likes').doc(_uid).set({'likedAt': Timestamp.now()});
+    // postAuthorId is denormalised so the post's author can delete this like
+    // when they delete the post — see the likes rule in firestore.rules (H13).
+    await _db.collection('posts').doc(postId).collection('likes').doc(_uid)
+        .set({'likedAt': Timestamp.now(), 'postAuthorId': postAuthorId});
     await _db.collection('posts').doc(postId).update({'likeCount': FieldValue.increment(1)});
-    notifyListeners();
+    // No notifyListeners(): the card toggles optimistically and the feed
+    // snapshot reflects the new likeCount on its own. Notifying here would
+    // rebuild every feed card redundantly.
   }
 
   Future<void> unlikePost(String postId) async {
@@ -716,7 +992,8 @@ class PostProvider extends ChangeNotifier {
     if (_uid == null) return;
     await _db.collection('posts').doc(postId).collection('likes').doc(_uid).delete();
     await _db.collection('posts').doc(postId).update({'likeCount': FieldValue.increment(-1)});
-    notifyListeners();
+    // No notifyListeners(): see likePost — the card and feed snapshot already
+    // cover this; an extra notify just rebuilds the whole feed.
   }
 
   Future<bool> isLiked(String postId) async {
@@ -726,6 +1003,18 @@ class PostProvider extends ChangeNotifier {
     final doc = await _db.collection('posts').doc(postId).collection('likes').doc(_uid).get();
     if (doc.exists) _liked.add(postId);
     return doc.exists;
+  }
+
+  /// Single-document fetch by id — used by the `/posts/:postId` deep link
+  /// (notification taps), which can't assume the post is already in [feed].
+  /// Returns null only when the post genuinely doesn't exist; a network/
+  /// transient failure is left to throw so the caller can offer a retry
+  /// instead of silently showing "not found" (see PostByIdScreen).
+  Future<PostModel?> getPost(String postId) async {
+    if (isMock) return _feed.where((p) => p.id == postId).firstOrNull;
+    final doc = await _db.collection('posts').doc(postId).get();
+    if (!doc.exists) return null;
+    return PostModel.fromFirestore(doc);
   }
 
   // ── Saved / Bookmarked posts ────────────────────────────────
@@ -755,8 +1044,58 @@ class PostProvider extends ChangeNotifier {
     return doc.exists;
   }
 
+  /// The signed-in user's saved posts, newest-saved first. `savedPosts` docs
+  /// only store `{savedAt}` (see [savePost]), so this re-fetches the actual
+  /// `posts` docs on every bookmark-list change rather than filtering
+  /// whatever happens to already be in [feed] — a saved post can easily have
+  /// scrolled out of the feed's loaded window.
+  /// A profile's own posts, newest first.
+  ///
+  /// H7: the profile grid used to filter the global feed (newest 25 posts
+  /// app-wide) by authorId, so a user with posts outside that window saw
+  /// "No posts yet" directly under a non-zero post count.
+  Stream<List<PostModel>> watchUserPosts(String userId) {
+    if (isMock) {
+      return Stream.value(
+          mockPosts.where((p) => p.authorId == userId).toList());
+    }
+    return userPostsQuery(_db, authorId: userId, isSelf: userId == _uid)
+        .snapshots()
+        .map((s) => s.docs.map((d) => PostModel.fromFirestore(d)).toList());
+  }
+
+  Stream<List<PostModel>> watchSavedPosts() {
+    if (isMock) return Stream.value(const []);
+    if (_uid == null) return Stream.value(const []);
+    return _db.collection('users').doc(_uid).collection('savedPosts')
+        .orderBy('savedAt', descending: true)
+        .snapshots()
+        .asyncMap((snap) async {
+      final ids = snap.docs.map((d) => d.id).toList();
+      if (ids.isEmpty) return <PostModel>[];
+      // Fetched one document at a time rather than with whereIn(documentId).
+      // The posts read rule admits a query only when it is provably limited to
+      // public or own posts; a whereIn on document ids proves neither, so the
+      // batched form now fails wholesale. Single-document gets are evaluated
+      // against the actual document, so each saved post succeeds or fails on
+      // its own — a post that was made private after being saved is skipped
+      // instead of breaking the whole screen.
+      final results = await Future.wait(ids.map((id) async {
+        try {
+          final doc = await _db.collection('posts').doc(id).get();
+          return doc.exists ? PostModel.fromFirestore(doc) : null;
+        } catch (_) {
+          return null; // no longer visible to this user
+        }
+      }));
+      // Preserve savedAt order, which ids already carries.
+      return results.whereType<PostModel>().toList();
+    });
+  }
+
   Stream<List<CommentModel>> watchComments(String postId) {
-    if (isMock) return Stream.value([
+    if (isMock) {
+      return Stream.value([
       CommentModel(id: 'c1', postId: postId, authorId: 'user_002',
         authorName: 'Maria Chen', text: 'This is amazing! 🔥',
         createdAt: DateTime.now().subtract(const Duration(minutes: 30))),
@@ -764,22 +1103,37 @@ class PostProvider extends ChangeNotifier {
         authorName: 'James Wright', text: 'So inspiring! Congrats 🎉',
         createdAt: DateTime.now().subtract(const Duration(minutes: 15))),
     ]);
+    }
     return _db.collection('posts').doc(postId).collection('comments')
         .orderBy('createdAt')
         .snapshots()
         .map((s) => s.docs.map((d) => CommentModel.fromFirestore(d)).toList());
   }
 
-  Future<void> addComment(String postId, String text) async {
+  Future<void> addComment(String postId, String text,
+      {required String postAuthorId}) async {
     if (isMock) return;
     if (_uid == null) return;
     final user = _auth.currentUser!;
     final ref = _db.collection('posts').doc(postId).collection('comments').doc();
     await ref.set({
-      'postId': postId, 'authorId': _uid, 'authorName': user.displayName ?? 'User',
+      // postAuthorId denormalised so the post author can delete this comment
+      // when they delete the post (H13, see firestore.rules).
+      'postId': postId, 'authorId': _uid, 'postAuthorId': postAuthorId,
+      'authorName': user.displayName ?? 'User',
       'text': text, 'likeCount': 0, 'createdAt': FieldValue.serverTimestamp(),
     });
     await _db.collection('posts').doc(postId).update({'commentCount': FieldValue.increment(1)});
+  }
+
+  /// Delete a comment. Firestore rules only allow this for the comment's own
+  /// author (`isOwner(resource.data.authorId)`) or an admin — mirrors
+  /// [addComment]'s counter update in reverse.
+  Future<void> deleteComment(String postId, String commentId) async {
+    if (isMock) return;
+    if (_uid == null) return;
+    await _db.collection('posts').doc(postId).collection('comments').doc(commentId).delete();
+    await _db.collection('posts').doc(postId).update({'commentCount': FieldValue.increment(-1)});
   }
 
   // Client-side defence against report-spamming. See
@@ -811,6 +1165,89 @@ class PostProvider extends ChangeNotifier {
     });
   }
 
+  /// Delete a post the signed-in user owns. Firestore rules enforce the
+  /// owner-or-admin check server-side (`isOwner(resource.data.authorId)`) —
+  /// this only needs to clean up what the rules don't cascade automatically:
+  /// the comments/likes subcollections and the uploaded media.
+  Future<void> deletePost(String postId,
+      {List<String> mediaUrls = const [], String? thumbnailUrl}) async {
+    if (isMock) return;
+    if (_uid == null) return;
+    final postRef = _db.collection('posts').doc(postId);
+
+    // H13: likes/comments carry a denormalised postAuthorId, so firestore.rules
+    // now lets the post's author delete engagement they don't own — the batch
+    // no longer fails the moment someone else liked or commented.
+    //
+    // Chunked at 400 (< Firestore's 500-write batch cap) so a viral post with
+    // hundreds of likes/comments doesn't overflow a single batch and throw.
+    final comments = await postRef.collection('comments').get();
+    final likes = await postRef.collection('likes').get();
+    final refs = [
+      ...comments.docs.map((d) => d.reference),
+      ...likes.docs.map((d) => d.reference),
+    ];
+    for (final group in chunked(refs, kWriteBatchLimit)) {
+      final batch = _db.batch();
+      for (final ref in group) {
+        batch.delete(ref);
+      }
+      await batch.commit();
+    }
+    // The post document itself, last — so if a cleanup batch above fails the
+    // post is still present and the delete can be retried, rather than the post
+    // vanishing while its engagement lingers as orphans.
+    await postRef.delete();
+
+    // Best-effort — a storage cleanup failure shouldn't block the post
+    // itself from being gone. Mirrors the swallow-and-continue style in
+    // [uploadPostImage]/[uploadPostVideo].
+    for (final url in [...mediaUrls, if (thumbnailUrl != null) thumbnailUrl]) {
+      try {
+        await FirebaseStorage.instance.refFromURL(url).delete();
+      } catch (_) {}
+    }
+
+    await _db.collection('users').doc(_uid).update({
+      'postCount': FieldValue.increment(-1),
+    });
+  }
+
+  /// Updates an existing post's caption/location (M-7 post edit). Media is
+  /// intentionally not editable here. Owner-only is enforced server-side by
+  /// the existing posts rule (`isOwner(resource.data.authorId)`) — no rules
+  /// change needed.
+  Future<void> updatePost(String postId,
+      {required String caption, String? location}) async {
+    if (isMock) {
+      final i = _feed.indexWhere((p) => p.id == postId);
+      if (i != -1) {
+        final p = _feed[i];
+        _feed[i] = PostModel(
+          id: p.id, authorId: p.authorId, authorName: p.authorName,
+          authorPhotoUrl: p.authorPhotoUrl, mediaUrls: p.mediaUrls,
+          mediaType: p.mediaType, thumbnailUrl: p.thumbnailUrl,
+          aspectRatio: p.aspectRatio, durationMs: p.durationMs,
+          caption: caption, location: location, likeCount: p.likeCount,
+          commentCount: p.commentCount, isReported: p.isReported,
+          reportCount: p.reportCount, groupId: p.groupId,
+          createdAt: p.createdAt, editedAt: DateTime.now(),
+        );
+      }
+      notifyListeners();
+      return;
+    }
+    if (_uid == null) return;
+    await _db.collection('posts').doc(postId).update({
+      'caption': caption,
+      'location': location,
+      'editedAt': FieldValue.serverTimestamp(),
+    });
+    // No manual _feed splice: the live snapshot listener already delivers
+    // the updated doc, mirroring likePost/unlikePost's real-mode convention
+    // (see their comments a few methods up).
+  }
+
   // ── Generic content reporting (groups, chats, users) ────────
   Future<void> reportContent({
     required String targetType,   // 'group' | 'chat' | 'user' | 'comment'
@@ -840,7 +1277,18 @@ class PostProvider extends ChangeNotifier {
         .doc(_uid)
         .collection('blocked')
         .doc(targetUid)
-        .set({'blockedAt': Timestamp.now()});
+        // blockedUid duplicates the document id on purpose. The "hide people
+        // who blocked me" lookup is a collectionGroup query, and those cannot
+        // filter on document ids — so without this field the reverse direction
+        // is not expressible, and firestore.rules keys its read allowance off
+        // it too. Legacy docs lacking it need the backfill script.
+        .set({'blockedAt': Timestamp.now(), 'blockedUid': targetUid});
+    // Apply immediately. The feed is a live snapshot listener, but blocking
+    // changes no post document, so nothing would re-emit — without this the
+    // user keeps seeing the person they just blocked until the next cold
+    // start, which is precisely the bug the snackbar was lying about.
+    _blockedUids = {..._blockedUids, targetUid};
+    _feed = withoutBlocked(_feed, _blockedUids, (p) => p.authorId);
     notifyListeners();
   }
 
@@ -853,7 +1301,36 @@ class PostProvider extends ChangeNotifier {
         .collection('blocked')
         .doc(targetUid)
         .delete();
+    _blockedUids = {..._blockedUids}..remove(targetUid);
+    // Their posts don't reappear until the feed re-queries; unblocking is not
+    // urgent the way blocking is, so we don't force a resubscribe here.
     notifyListeners();
+  }
+
+  /// The signed-in user's blocked list, newest-blocked first. `blocked` docs
+  /// only store `{blockedAt}` (see [blockUser]), so this re-fetches the
+  /// actual `users` docs on every change — mirrors [watchSavedPosts].
+  Stream<List<UserModel>> watchBlockedUsers() {
+    if (isMock) return Stream.value(const []);
+    if (_uid == null) return Stream.value(const []);
+    return _db.collection('users').doc(_uid).collection('blocked')
+        .orderBy('blockedAt', descending: true)
+        .snapshots()
+        .asyncMap((snap) async {
+      final ids = snap.docs.map((d) => d.id).toList();
+      if (ids.isEmpty) return <UserModel>[];
+      final users = <UserModel>[];
+      // Firestore caps whereIn at 30 values per query.
+      for (var i = 0; i < ids.length; i += 30) {
+        final chunk = ids.sublist(i, i + 30 > ids.length ? ids.length : i + 30);
+        final usersSnap = await _db.collection('users')
+            .where(FieldPath.documentId, whereIn: chunk).get();
+        users.addAll(usersSnap.docs.map((d) => UserModel.fromFirestore(d)));
+      }
+      // whereIn doesn't preserve order — resort to match blockedAt order.
+      users.sort((a, b) => ids.indexOf(a.uid).compareTo(ids.indexOf(b.uid)));
+      return users;
+    });
   }
 
   // Upload image bytes to Firebase Storage and return the public download URL.
@@ -877,10 +1354,45 @@ class PostProvider extends ChangeNotifier {
     }
   }
 
+  // Upload a post video (+ optional poster) to Firebase Storage and return the
+  // download URLs. Mirrors [uploadPostImage] (bytes in → putData → URL out) but
+  // skips image compression (that codec is image-only) and tags the correct
+  // video content-type. The composer reads bytes and generates the poster, so
+  // this stays free of dart:io / plugin imports and is safe for the web build.
+  // Path: user_uploads/{uid}/posts/{timestamp}.{mp4|mov} (+ _thumb.jpg)
+  Future<Map<String, String>?> uploadPostVideo({
+    required Uint8List videoBytes,
+    required String ext, // 'mp4' | 'mov'
+    Uint8List? thumbnailBytes,
+  }) async {
+    if (isMock) return null;
+    if (_uid == null) return null;
+    try {
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final contentType = ext == 'mov' ? 'video/quicktime' : 'video/mp4';
+      final vref = FirebaseStorage.instance.ref('user_uploads/$_uid/posts/$ts.$ext');
+      await vref.putData(videoBytes, SettableMetadata(contentType: contentType));
+      final videoUrl = await vref.getDownloadURL();
+
+      String? thumbnailUrl;
+      if (thumbnailBytes != null) {
+        final tref = FirebaseStorage.instance.ref('user_uploads/$_uid/posts/${ts}_thumb.jpg');
+        await tref.putData(thumbnailBytes, SettableMetadata(contentType: 'image/jpeg'));
+        thumbnailUrl = await tref.getDownloadURL();
+      }
+      return {'videoUrl': videoUrl, if (thumbnailUrl != null) 'thumbnailUrl': thumbnailUrl};
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> createPost({
     required String caption,
     List<String> mediaUrls = const [],
     String mediaType = 'text',
+    String? thumbnailUrl,
+    double? aspectRatio,
+    int? durationMs,
     String? location,
     String? groupId,
     String audience = 'Everyone',  // Everyone | Connections | Only me
@@ -892,6 +1404,7 @@ class PostProvider extends ChangeNotifier {
         authorId: user?.uid ?? 'user_001', authorName: user?.name ?? 'Alex Johnson',
         authorPhotoUrl: user?.photoUrl,
         caption: caption, mediaUrls: mediaUrls, mediaType: mediaType,
+        thumbnailUrl: thumbnailUrl, aspectRatio: aspectRatio, durationMs: durationMs,
         location: location, likeCount: 0, commentCount: 0, createdAt: DateTime.now());
       _feed.insert(0, post);
       notifyListeners(); return;
@@ -902,11 +1415,11 @@ class PostProvider extends ChangeNotifier {
     final post = PostModel(
       id: ref.id, authorId: _uid!, authorName: user.displayName ?? 'User',
       caption: caption, mediaUrls: mediaUrls, mediaType: mediaType,
+      thumbnailUrl: thumbnailUrl, aspectRatio: aspectRatio, durationMs: durationMs,
       location: location, groupId: groupId, createdAt: DateTime.now(),
+      audience: audience,
     );
-    final data = post.toFirestore();
-    data['audience'] = audience; // annotate the doc so feed queries can filter
-    await ref.set(data);
+    await ref.set(post.toFirestore());
     await _db.collection('users').doc(_uid).update({'postCount': FieldValue.increment(1)});
     notifyListeners();
   }
@@ -918,8 +1431,8 @@ class PostProvider extends ChangeNotifier {
 // ─── Real Chat Provider ──────────────────────────────────────
 class ChatProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _db;
+  final FirebaseAuth _auth;
   List<ChatModel> _chats = [];
   StreamSubscription? _chatsSub;
   AuthProvider? _storedAuth;
@@ -927,13 +1440,20 @@ class ChatProvider extends ChangeNotifier {
 
   List<ChatModel> get chats => _chats;
 
+  /// Total unread messages for the signed-in user across every conversation.
+  /// Backs the top-bar chat badge; 0 when nothing is unread so the badge hides.
+  int get totalUnread =>
+      _chats.fold(0, (acc, c) => acc + (c.unreadCount[_uid] ?? 0));
+
   /// Non-null when the chat-list stream has reported a failure.
   /// Cleared on a successful snapshot or an explicit retry.
   String? get chatsError => _chatsError;
 
   String? get _uid => isMock ? (_storedAuth?.currentUser?.uid ?? 'user_001') : _auth.currentUser?.uid;
 
-  ChatProvider({this.isMock = false}) {
+  ChatProvider({this.isMock = false, FirebaseFirestore? db, FirebaseAuth? auth})
+      : _db = db ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance {
     if (isMock) _chats = List.from(mockChats);
   }
 
@@ -965,11 +1485,20 @@ class ChatProvider extends ChangeNotifier {
     });
   }
 
+  /// Most-recent messages, oldest→newest for display. H24: this used to stream
+  /// the ENTIRE history unbounded, re-emitting every message on each new one —
+  /// unbounded memory and read cost on a long chat. Bounded to the recent
+  /// window and queried newest-first + reversed. Scroll-back pagination to load
+  /// older messages is a follow-up; this matches the usual chat default of
+  /// showing recent history rather than everything.
+  static const int _messageWindow = 100;
+
   Stream<List<MessageModel>> watchMessages(String chatId) {
     if (isMock) return Stream.value(mockMessages[chatId] ?? []);
     return _db.collection('chats').doc(chatId).collection('messages')
-        .orderBy('createdAt').snapshots()
-        .map((s) => s.docs.map((d) => MessageModel.fromFirestore(d)).toList());
+        .orderBy('createdAt', descending: true).limit(_messageWindow).snapshots()
+        .map((s) => s.docs.map((d) => MessageModel.fromFirestore(d))
+            .toList().reversed.toList());
   }
 
   Future<void> sendMessage(String chatId, String text,
@@ -993,7 +1522,11 @@ class ChatProvider extends ChangeNotifier {
     }
     if (_uid == null) return;
     final user = _auth.currentUser!;
-    final msgRef = _db.collection('chats').doc(chatId).collection('messages').doc();
+    final chatRef = _db.collection('chats').doc(chatId);
+    final msgRef = chatRef.collection('messages').doc();
+    final cachedChat = _chats.where((c) => c.id == chatId).firstOrNull;
+    final participants = cachedChat?.participants ??
+        List<String>.from((await chatRef.get()).data()?['participants'] ?? []);
     final batch = _db.batch();
     batch.set(msgRef, {
       'senderId': _uid, 'senderName': user.displayName ?? 'User',
@@ -1001,18 +1534,71 @@ class ChatProvider extends ChangeNotifier {
       'mediaUrl': mediaUrl, 'mediaType': mediaType,
       'readBy': [_uid], 'createdAt': FieldValue.serverTimestamp(),
     });
-    batch.update(_db.collection('chats').doc(chatId), {
-      'lastMessage': text, 'lastMessageSenderId': _uid,
+    final chatUpdate = <String, dynamic>{
+      // An image sent with no caption would otherwise leave the chat list's
+      // "last message" preview blank (M-7 chat attachments).
+      'lastMessage': text.isEmpty && mediaType == 'image' ? '📷 Photo' : text,
+      'lastMessageSenderId': _uid,
       'lastMessageAt': FieldValue.serverTimestamp(),
-    });
+    };
+    for (final uid in participants) {
+      if (uid != _uid) chatUpdate['unreadCount.$uid'] = FieldValue.increment(1);
+    }
+    batch.update(chatRef, chatUpdate);
     await batch.commit();
     notifyListeners();
+  }
+
+  /// Upload a chat image to Firebase Storage and return the public download
+  /// URL. Mirrors PostProvider.uploadPostImage exactly (M-7 chat attachments).
+  /// Path: user_uploads/{uid}/chat/{timestamp}.png
+  Future<String?> uploadChatImage(Uint8List bytes) async {
+    if (isMock) return null;
+    if (_uid == null) return null;
+    try {
+      final compressed = await compressForUpload(bytes);
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final ref = FirebaseStorage.instance.ref('user_uploads/$_uid/chat/$ts.png');
+      await ref.putData(compressed, SettableMetadata(contentType: 'image/png'));
+      return await ref.getDownloadURL();
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> markAsRead(String chatId) async {
     if (isMock) return;
     if (_uid == null) return;
     await _db.collection('chats').doc(chatId).update({'unreadCount.$_uid': 0});
+  }
+
+  /// Toggles whether the signed-in user has muted this conversation (M-7).
+  /// Muted state is per-user (`mutedBy` array on the chat doc) so it doesn't
+  /// affect other participants' notifications.
+  Future<void> toggleMute(String chatId) async {
+    if (isMock) return;
+    if (_uid == null) return;
+    final chat = _chats.where((c) => c.id == chatId).firstOrNull;
+    final isMuted = chat?.mutedBy.contains(_uid) ?? false;
+    await _db.collection('chats').doc(chatId).update({
+      'mutedBy': isMuted ? FieldValue.arrayRemove([_uid]) : FieldValue.arrayUnion([_uid]),
+    });
+  }
+
+  /// Appends the current user to `readBy` on every message they haven't
+  /// seen yet, so the sender's bubble flips from a single check to a
+  /// double check (read receipt).
+  Future<void> markMessagesRead(String chatId) async {
+    if (isMock) return;
+    if (_uid == null) return;
+    // H24: chunked below the 500-write batch cap — a chat with >500 unread used
+    // to throw one oversized batch straight out of initState. Also guarded:
+    // this is called fire-and-forget from initState, so a failure here (network
+    // / permission) must not surface as an unhandled async error — marking read
+    // is best-effort and the badge simply stays until the next open.
+    try {
+      await markMessagesReadIn(_db, chatId: chatId, uid: _uid!);
+    } catch (_) {}
   }
 
   Future<String> getOrCreateDm(String otherUid) async {
@@ -1022,7 +1608,10 @@ class ChatProvider extends ChangeNotifier {
       final newId = 'chat_new_$otherUid';
       final other = mockUsers.where((u) => u.uid == otherUid).firstOrNull;
       _chats.add(ChatModel(id: newId, type: 'dm', participants: [_uid!, otherUid],
-        groupName: other?.name ?? 'User', lastMessage: null, lastMessageAt: null,
+        participantNames: ChatModel.namesMap(
+          meUid: _uid!, meName: _storedAuth?.currentUser?.name,
+          otherUid: otherUid, otherName: other?.name),
+        lastMessage: null, lastMessageAt: null,
         unreadCount: {}, createdBy: _uid!, createdAt: DateTime.now()));
       notifyListeners();
       return newId;
@@ -1035,9 +1624,27 @@ class ChatProvider extends ChangeNotifier {
       final chat = ChatModel.fromFirestore(doc);
       if (chat.participants.contains(otherUid)) return doc.id;
     }
+    // Denormalise both display names onto the doc so the chat list can render
+    // a DM title without an extra users/{uid} read per row. A failure here
+    // must not block chat creation — displayNameFor falls back to 'User'.
+    Map<String, String> names = const {};
+    try {
+      final docs = await Future.wait([
+        _db.collection('users').doc(_uid).get(),
+        _db.collection('users').doc(otherUid).get(),
+      ]);
+      names = ChatModel.namesMap(
+        meUid: _uid!, meName: docs[0].data()?['name'] as String?,
+        otherUid: otherUid, otherName: docs[1].data()?['name'] as String?,
+      );
+    } catch (_) {
+      // Leave names empty; the tile degrades to 'User' rather than failing.
+    }
+
     final ref = _db.collection('chats').doc();
     await ref.set({
       'type': 'dm', 'participants': [_uid, otherUid],
+      'participantNames': names,
       'createdBy': _uid, 'unreadCount': {}, 'createdAt': FieldValue.serverTimestamp(),
     });
     return ref.id;
@@ -1064,8 +1671,8 @@ class ChatProvider extends ChangeNotifier {
 // ─── Real Event Provider ─────────────────────────────────────
 class EventProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _db;
+  final FirebaseAuth _auth;
   List<EventModel> _events = [];
   final Set<String> _rsvpd = {};
   StreamSubscription? _eventsSub;
@@ -1074,13 +1681,24 @@ class EventProvider extends ChangeNotifier {
 
   List<EventModel> get events => _events;
 
+  /// Events an ordinary user should see: only ones admin has approved. The
+  /// admin "Pending" queue was previously cosmetic — nothing else filtered
+  /// on isApproved, so every unreviewed event was already publicly visible.
+  List<EventModel> get visibleEvents => _events.where((e) => e.isApproved).toList();
+
+  /// An owning business's own events, regardless of approval state, so they
+  /// can still see/manage their own pending event on their dashboard.
+  List<EventModel> myEvents(String uid) => _events.where((e) => e.createdBy == uid).toList();
+
   /// Non-null when the events stream has reported a failure. Cleared on
   /// every successful snapshot or via [retryEvents].
   String? get eventsError => _eventsError;
 
   String? get _uid => isMock ? (_storedAuth?.currentUser?.uid ?? 'user_001') : _auth.currentUser?.uid;
 
-  EventProvider({this.isMock = false}) {
+  EventProvider({this.isMock = false, FirebaseFirestore? db, FirebaseAuth? auth})
+      : _db = db ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance {
     if (isMock) { _events = List.from(mockEvents); _rsvpd.add('evt_004'); }
   }
 
@@ -1144,10 +1762,51 @@ class EventProvider extends ChangeNotifier {
 
   bool isRsvpd(String eventId) => _rsvpd.contains(eventId);
 
-  void addEvent(EventModel event) {
+  // Upload an event cover image to Firebase Storage and return the public
+  // download URL. Mirrors [PostProvider.uploadPostImage].
+  // Path: user_uploads/{uid}/events/{timestamp}.png
+  Future<String?> uploadEventImage(Uint8List bytes) async {
+    if (isMock) return null;
+    if (_uid == null) return null;
+    try {
+      final compressed = await compressForUpload(bytes);
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final ref = FirebaseStorage.instance.ref('user_uploads/$_uid/events/$ts.png');
+      await ref.putData(compressed, SettableMetadata(contentType: 'image/png'));
+      return await ref.getDownloadURL();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> addEvent(EventModel event) async {
     if (isMock) { _events.insert(0, event); notifyListeners(); return; }
-    _db.collection('events').doc().set(event.toFirestore());
+    await _db.collection('events').doc().set(event.toFirestore());
     notifyListeners();
+  }
+
+  Future<void> updateEvent(String eventId,
+      {String? title, String? description, String? location, String? imageUrl}) async {
+    if (isMock) { notifyListeners(); return; }
+    final updates = <String, dynamic>{};
+    if (title != null) updates['title'] = title;
+    if (description != null) updates['description'] = description;
+    if (location != null) updates['location'] = location;
+    if (imageUrl != null) updates['imageUrl'] = imageUrl;
+    if (updates.isEmpty) return;
+    await _db.collection('events').doc(eventId).update(updates);
+  }
+
+  /// Removes an attendee entirely: deletes their rsvp subdoc and reverses
+  /// their contribution to rsvpList/rsvpCount on the parent event.
+  Future<void> removeAttendee(String eventId, String uid) async {
+    if (isMock) { notifyListeners(); return; }
+    await _db.collection('events').doc(eventId).collection('rsvps').doc(uid).delete();
+    await _db.collection('events').doc(eventId).update({
+      'rsvpList': FieldValue.arrayRemove([uid]),
+      'rsvpCount': FieldValue.increment(-1),
+    });
+    _rsvpd.remove(eventId);
   }
 
   @override
@@ -1157,8 +1816,8 @@ class EventProvider extends ChangeNotifier {
 // ─── Real Group Provider ─────────────────────────────────────
 class GroupProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _db;
+  final FirebaseAuth _auth;
   List<GroupModel> _groups = [];
   final Set<String> _joined = {};
   StreamSubscription? _groupsSub;
@@ -1167,7 +1826,9 @@ class GroupProvider extends ChangeNotifier {
   List<GroupModel> get myGroups => _groups.where((g) => _joined.contains(g.id)).toList();
   String? get _uid => isMock ? null : _auth.currentUser?.uid;
 
-  GroupProvider({this.isMock = false}) {
+  GroupProvider({this.isMock = false, FirebaseFirestore? db, FirebaseAuth? auth})
+      : _db = db ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance {
     if (isMock) { _groups = List.from(mockGroups); _joined.addAll({'grp_001', 'grp_002'}); }
   }
 
@@ -1217,11 +1878,79 @@ class GroupProvider extends ChangeNotifier {
 
   bool isMember(String groupId) => _joined.contains(groupId);
 
-  void createGroup(GroupModel group) {
+  Future<void> createGroup(GroupModel group) async {
     if (isMock) { _groups.insert(0, group); _joined.add(group.id); notifyListeners(); return; }
-    _db.collection('groups').doc().set(group.toFirestore());
-    if (group.id.isNotEmpty) _joined.add(group.id);
+    // Track the real Firestore-assigned doc id, not group.id (a disposable
+    // client-side placeholder never persisted — see toFirestore()/fromFirestore()) —
+    // otherwise _joined never matches the doc the snapshot listener loads back,
+    // and the creator's own new group silently never shows up under "My Groups".
+    final ref = _db.collection('groups').doc();
+    await ref.set(group.toFirestore());
+    _joined.add(ref.id);
     notifyListeners();
+  }
+
+  Future<void> deleteGroup(String groupId) async {
+    if (isMock) { _groups.removeWhere((g) => g.id == groupId); notifyListeners(); return; }
+    await _db.collection('groups').doc(groupId).delete();
+  }
+
+  /// Resolves member uids to profiles, capped to avoid unbounded reads on
+  /// large groups (some groups here run 1000+ members). Chunked into
+  /// Firestore's 30-id `whereIn` limit.
+  static const int memberFetchCap = 60;
+
+  Future<List<UserModel>> fetchMembers(List<String> memberUids) async {
+    // Mock mode returned an empty list, which since H22 would render every
+    // member row as a bare uid.
+    if (isMock) {
+      return mockUsers.where((u) => memberUids.contains(u.uid)).toList();
+    }
+    final capped = memberUids.take(memberFetchCap).toList();
+    final results = <UserModel>[];
+    for (var i = 0; i < capped.length; i += 30) {
+      final chunk = capped.sublist(i, i + 30 > capped.length ? capped.length : i + 30);
+      if (chunk.isEmpty) continue;
+      final snap = await _db.collection('users')
+          .where(FieldPath.documentId, whereIn: chunk).get();
+      results.addAll(snap.docs.map((d) => UserModel.fromFirestore(d)));
+    }
+    return results;
+  }
+
+  Future<void> removeMember(String groupId, String uid) async {
+    if (isMock) { notifyListeners(); return; }
+    await _db.collection('groups').doc(groupId).update({
+      'members': FieldValue.arrayRemove([uid]),
+      'admins': FieldValue.arrayRemove([uid]),
+      'memberCount': FieldValue.increment(-1),
+    });
+  }
+
+  Future<void> makeAdmin(String groupId, String uid) async {
+    if (isMock) { notifyListeners(); return; }
+    await _db.collection('groups').doc(groupId).update({
+      'admins': FieldValue.arrayUnion([uid]),
+    });
+  }
+
+  Future<void> setChatEnabled(String groupId, bool enabled) async {
+    if (isMock) { notifyListeners(); return; }
+    await _db.collection('groups').doc(groupId).update({'chatEnabled': enabled});
+  }
+
+  /// Persists a broadcast as a durable, auditable record. Does not yet fan
+  /// out as per-member push/notifications — see firestore.rules for the
+  /// admin-gated write rule backing this subcollection.
+  Future<void> sendBroadcast(String groupId, String text) async {
+    if (isMock) return;
+    final uid = _uid;
+    if (uid == null) return;
+    await _db.collection('groups').doc(groupId).collection('broadcasts').add({
+      'senderId': uid,
+      'text': text,
+      'sentAt': FieldValue.serverTimestamp(),
+    });
   }
 
   @override
@@ -1231,19 +1960,26 @@ class GroupProvider extends ChangeNotifier {
 // ─── Real Match Provider ─────────────────────────────────────
 class MatchProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _db;
+  final FirebaseAuth _auth;
   List<UserModel> _candidates = [];
   final List<MatchModel> _matches = [];
   bool _loading = false;
+  String? _error;
   AuthProvider? _storedAuth;
 
   bool get loading => _loading;
+  /// Non-null when the last loadCandidates failed. H14: two unguarded reads
+  /// meant an offline/permission-denied error left _loading stuck true and the
+  /// Match tab spun forever with no error and no retry.
+  String? get error => _error;
   List<UserModel> get candidates => _candidates;
   List<MatchModel> get matches => _matches;
   String? get _uid => isMock ? (_storedAuth?.currentUser?.uid ?? 'user_001') : _auth.currentUser?.uid;
 
-  MatchProvider({this.isMock = false}) {
+  MatchProvider({this.isMock = false, FirebaseFirestore? db, FirebaseAuth? auth})
+      : _db = db ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance {
     if (isMock) _candidates = List.from(mockUsers);
   }
 
@@ -1254,58 +1990,118 @@ class MatchProvider extends ChangeNotifier {
   Future<void> loadCandidates() async {
     if (isMock) { _candidates = List.from(mockUsers); notifyListeners(); return; }
     if (_uid == null) return;
-    _loading = true; notifyListeners();
-    final snap = await _db.collection('users').where('role', isEqualTo: 'user').limit(20).get();
-    _candidates = snap.docs.map((d) => UserModel.fromFirestore(d)).where((u) => u.uid != _uid).toList();
+    _loading = true; _error = null; notifyListeners();
+
+    // H14: every read below is inside this try. Previously the profile fetch
+    // and the candidate query were unguarded, so offline / permission-denied
+    // threw straight past `_loading = false` and the tab spun forever.
+    try {
+      // Honor the filters set on the Match Preferences screen
+      // (users/{uid}.matchPrefs). Age/distance are persisted there too but
+      // can't be applied yet — UserModel carries no DOB or geo — so those stay
+      // a follow-up once that data exists. We over-fetch (50) since filtering
+      // thins the pool client-side.
+      final meDoc = await _db.collection('users').doc(_uid).get();
+      final me = meDoc.data() ?? const <String, dynamic>{};
+      final prefs = (me['matchPrefs'] as Map<String, dynamic>?) ?? const {};
+      final myAirline = me['airline'] as String?;
+      final verifiedOnly = prefs['verifiedOnly'] == true;
+      final sameAirline = prefs['sameAirline'] == true;
+      final airlines = List<String>.from(prefs['airlines'] ?? const <String>[]);
+      final positions = List<String>.from(prefs['positions'] ?? const <String>[]);
+
+      // Blocking removes someone from the deck in both directions; acting on
+      // someone (like/pass/match) removes them too, so passed profiles don't
+      // come straight back (H15). Both reads are required for a correct deck,
+      // so a failure surfaces as an error rather than an unfiltered deck — a
+      // swipe is an irreversible social action.
+      final blocked = await fetchBlockedUids(_db, _uid!);
+      final actedOn = await fetchActedOnUids(_db, _uid!);
+
+      final snap = await _db.collection('users')
+          .where('role', isEqualTo: 'user').limit(50).get();
+      _candidates = snap.docs
+          .map((d) => UserModel.fromFirestore(d))
+          .where((u) => u.uid != _uid)
+          .where((u) => !blocked.contains(u.uid))
+          .where((u) => !actedOn.contains(u.uid))
+          .where((u) => !verifiedOnly || u.isVerified)
+          .where((u) => !sameAirline || (myAirline != null && u.airline == myAirline))
+          .where((u) => airlines.isEmpty || (u.airline != null && airlines.contains(u.airline)))
+          .where((u) => positions.isEmpty || (u.position != null && positions.contains(u.position)))
+          .toList();
+    } catch (_) {
+      _candidates = [];
+      _error = 'Could not load matches. Please try again.';
+    }
     _loading = false; notifyListeners();
   }
 
-  Future<void> likeUser(String targetUid, String matchType) async {
+  /// Likes [targetUid] and reports whether that produced a MUTUAL match.
+  ///
+  /// The return value exists so the screen can stop claiming "It's a Match!"
+  /// after every like (H1). Callers must not assume true.
+  Future<bool> likeUser(String targetUid, String matchType) async {
     _candidates.removeWhere((u) => u.uid == targetUid);
     if (isMock) {
-      if (DateTime.now().millisecond % 2 == 0) {
-        final matched = mockUsers.where((u) => u.uid == targetUid).firstOrNull;
-        if (matched != null) {
-          _matches.add(MatchModel(id: 'match_$targetUid', userA: _uid ?? 'user_001',
-            userB: targetUid, status: 'matched', matchType: matchType,
-            likedAt: DateTime.now(), matchedAt: DateTime.now()));
-        }
+      // Mock mode alternates deterministically on the target uid rather than
+      // on the wall clock. `DateTime.now().millisecond % 2` made this a coin
+      // flip that produced a different result for the same tap each run —
+      // untestable, and impossible to demo either state on purpose.
+      final matched = mockUsers.where((u) => u.uid == targetUid).firstOrNull;
+      final isMatch = matched != null && targetUid.hashCode.isEven;
+      if (isMatch) {
+        _matches.add(MatchModel(id: 'match_$targetUid', userA: _uid ?? 'user_001',
+          userB: targetUid, status: 'matched', matchType: matchType,
+          likedAt: DateTime.now(), matchedAt: DateTime.now()));
       }
-      notifyListeners(); return;
+      notifyListeners();
+      return isMatch;
     }
-    if (_uid == null) return;
-    final existing = await _db.collection('matches')
-        .where('userA', isEqualTo: targetUid).where('userB', isEqualTo: _uid)
-        .where('status', isEqualTo: 'pending').get();
-    if (existing.docs.isNotEmpty) {
-      await existing.docs.first.reference.update({'status': 'matched', 'matchedAt': FieldValue.serverTimestamp()});
-      _matches.add(MatchModel(id: existing.docs.first.id, userA: targetUid, userB: _uid!,
-        status: 'matched', matchType: matchType, likedAt: DateTime.now(), matchedAt: DateTime.now()));
-    } else {
-      await _db.collection('matches').add({
-        'userA': _uid, 'userB': targetUid, 'status': 'pending',
-        'matchType': matchType, 'likedAt': FieldValue.serverTimestamp(),
-      });
+    if (_uid == null) return false;
+
+    final bool isMatch;
+    try {
+      isMatch = await recordLike(_db,
+          myUid: _uid!, targetUid: targetUid, matchType: matchType);
+    } catch (_) {
+      // Never claim a match we couldn't confirm.
+      notifyListeners();
+      return false;
+    }
+    if (isMatch) {
+      _matches.add(MatchModel(id: 'match_$targetUid', userA: targetUid, userB: _uid!,
+        status: 'matched', matchType: matchType,
+        likedAt: DateTime.now(), matchedAt: DateTime.now()));
     }
     notifyListeners();
+    return isMatch;
   }
 
   Future<void> passUser(String targetUid) async {
     _candidates.removeWhere((u) => u.uid == targetUid);
     if (isMock) { notifyListeners(); return; }
     if (_uid == null) return;
-    await _db.collection('matches').add({
-      'userA': _uid, 'userB': targetUid, 'status': 'passed',
-      'matchType': 'none', 'likedAt': FieldValue.serverTimestamp(),
-    });
+    // H15: idempotent write keyed on the (me, target) pair. The old add()
+    // created a fresh doc on every pass.
+    await recordPass(_db, myUid: _uid!, targetUid: targetUid);
     notifyListeners();
   }
+}
+
+/// Distinguishes "you're offline" from a real backend failure so
+/// NotificationProvider doesn't show the same dead-end copy for both (M-8).
+String describeNotificationsError(Object err) {
+  if (err is FirebaseException && err.code == 'unavailable') {
+    return 'You\'re offline. Check your connection and try again.';
+  }
+  return 'Something went wrong loading notifications. Please try again.';
 }
 
 // ─── Real Notification Provider ──────────────────────────────
 class NotificationProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
   List<NotificationModel> _notifications = [];
   StreamSubscription? _notifSub;
   AuthProvider? _storedAuth;
@@ -1317,7 +2113,8 @@ class NotificationProvider extends ChangeNotifier {
   /// Non-null when the notifications stream has reported a failure.
   String? get notificationsError => _notificationsError;
 
-  NotificationProvider({this.isMock = false}) {
+  NotificationProvider({this.isMock = false, FirebaseFirestore? db})
+      : _db = db ?? FirebaseFirestore.instance {
     if (isMock) _notifications = List.from(mockNotifications);
   }
 
@@ -1345,7 +2142,7 @@ class NotificationProvider extends ChangeNotifier {
       if (_notificationsError != null) _notificationsError = null;
       notifyListeners();
     }, onError: (Object err) {
-      _notificationsError = 'Could not load notifications.';
+      _notificationsError = describeNotificationsError(err);
       notifyListeners();
     });
   }
@@ -1397,13 +2194,14 @@ class NotificationProvider extends ChangeNotifier {
 // ─── Real Trip Provider ──────────────────────────────────────
 class TripProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
   List<TripModel> _trips = [];
   StreamSubscription? _tripsSub;
 
   List<TripModel> get trips => _trips;
 
-  TripProvider({this.isMock = false}) {
+  TripProvider({this.isMock = false, FirebaseFirestore? db})
+      : _db = db ?? FirebaseFirestore.instance {
     if (isMock) _trips = List.from(mockTrips);
   }
 
@@ -1419,6 +2217,20 @@ class TripProvider extends ChangeNotifier {
         notifyListeners();
       });
     }
+  }
+
+  /// Another user's trips, newest first — for viewing their passport read-only
+  /// (H9). The signed-in user's own passport keeps using the live [trips]
+  /// stream + edit controls; this is the foreign, read-only path.
+  Stream<List<TripModel>> watchUserTrips(String userId) {
+    if (isMock) {
+      return Stream.value(mockTrips.where((t) => t.userId == userId).toList());
+    }
+    return _db.collection('trips')
+        .where('userId', isEqualTo: userId)
+        .orderBy('startDate', descending: true)
+        .snapshots()
+        .map((s) => s.docs.map((d) => TripModel.fromFirestore(d)).toList());
   }
 
   Future<void> addTrip(TripModel trip) async {
@@ -1441,7 +2253,7 @@ class TripProvider extends ChangeNotifier {
 // ─── Real Promotion Provider ─────────────────────────────────
 class PromotionProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
   List<PromotionModel> _promotions = [];
   StreamSubscription? _promoSub;
 
@@ -1450,7 +2262,14 @@ class PromotionProvider extends ChangeNotifier {
       _promotions.where((p) => p.isActive && p.isApproved).toList();
   List<PromotionModel> get expiredPromotions => _promotions.where((p) => !p.isActive).toList();
 
-  PromotionProvider({this.isMock = false}) {
+  /// An owning business's own promotions, regardless of approval/active
+  /// state — used by the business's own "Crew Deals" dashboard tab, which
+  /// must not show other businesses' promotions.
+  List<PromotionModel> myPromotions(String uid) =>
+      _promotions.where((p) => p.businessId == uid).toList();
+
+  PromotionProvider({this.isMock = false, FirebaseFirestore? db})
+      : _db = db ?? FirebaseFirestore.instance {
     if (isMock) _promotions = List.from(mockPromotions);
   }
 
@@ -1463,9 +2282,9 @@ class PromotionProvider extends ChangeNotifier {
     });
   }
 
-  void addPromotion(PromotionModel promo) {
+  Future<void> addPromotion(PromotionModel promo) async {
     if (isMock) { _promotions.insert(0, promo); notifyListeners(); return; }
-    _db.collection('promotions').doc().set(promo.toFirestore());
+    await _db.collection('promotions').doc().set(promo.toFirestore());
     notifyListeners();
   }
 
@@ -1476,7 +2295,7 @@ class PromotionProvider extends ChangeNotifier {
 // ─── Real Search Provider ────────────────────────────────────
 class SearchProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
   List<UserModel> _userResults = [];
   List<EventModel> _eventResults = [];
   List<GroupModel> _groupResults = [];
@@ -1489,7 +2308,8 @@ class SearchProvider extends ChangeNotifier {
   bool get loading => _loading;
   String get query => _query;
 
-  SearchProvider({this.isMock = false});
+  SearchProvider({this.isMock = false, FirebaseFirestore? db})
+      : _db = db ?? FirebaseFirestore.instance;
 
   void updateAuth(AuthProvider auth) {}
 
@@ -1538,34 +2358,101 @@ class SearchProvider extends ChangeNotifier {
 // ─── Real SafeCheck Provider ─────────────────────────────────
 class SafeCheckProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
   List<SafeCheckModel> _checkIns = [];
   SafeCheckModel? _myLatestCheckIn;
   bool _loading = false;
-  StreamSubscription? _checkInSub;
 
   List<SafeCheckModel> get checkIns => _checkIns;
   SafeCheckModel? get myLatestCheckIn => _myLatestCheckIn;
   bool get loading => _loading;
   List<SafeCheckModel> get activeCheckIns => _checkIns.where((c) => c.isActive).toList();
 
-  SafeCheckProvider({this.isMock = false}) {
+  SafeCheckProvider({this.isMock = false, FirebaseFirestore? db})
+      : _db = db ?? FirebaseFirestore.instance {
     if (isMock) _checkIns = List.from(mockSafeChecks);
   }
 
+  // One subscription per visibility branch — see below.
+  final List<StreamSubscription> _checkInSubs = [];
+  final Map<String, List<SafeCheckModel>> _checkInsBySource = {};
+  String? _viewerUid;
+
   void updateAuth(AuthProvider auth) {
     if (isMock) return;
-    _checkInSub?.cancel();
-    _checkInSub = _db.collection('safeChecks')
-        .orderBy('createdAt', descending: true).limit(100).snapshots().listen((snap) {
-      _checkIns = snap.docs.map((d) => SafeCheckModel.fromFirestore(d)).toList();
-      final uid = auth.currentUser?.uid;
-      if (uid != null) {
-        final my = _checkIns.where((c) => c.userId == uid && c.isActive).toList();
-        _myLatestCheckIn = my.isNotEmpty ? my.first : null;
-      }
+    final uid = auth.currentUser?.uid;
+    _viewerUid = uid;
+
+    for (final sub in _checkInSubs) {
+      sub.cancel();
+    }
+    _checkInSubs.clear();
+    _checkInsBySource.clear();
+
+    if (uid == null) {
+      _checkIns = [];
       notifyListeners();
-    });
+      return;
+    }
+
+    // H18: the old single `orderBy(createdAt).limit(100)` scan is now rejected
+    // outright — firestore.rules only admits a safeChecks query that is
+    // provably within one visibility branch, and Firestore fails an entire
+    // query if any matched document is denied. So each branch the viewer is
+    // entitled to gets its own constrained subscription, merged client-side.
+    final base = _db.collection('safeChecks');
+
+    _listenBranch('all',
+        base.where('visibility', isEqualTo: 'all'));
+    _listenBranch('mine',
+        base.where('userId', isEqualTo: uid));
+    _listenBranch('friends',
+        base.where('visibility', isEqualTo: 'friends')
+            .where('visibleTo', arrayContains: uid));
+
+    // 'verified' check-ins are readable only by verified readers; querying it
+    // as an unverified user would be denied, taking the whole stream with it.
+    if (auth.currentUser?.isVerified == true) {
+      _listenBranch('verified',
+          base.where('visibility', isEqualTo: 'verified'));
+    }
+  }
+
+  void _listenBranch(String source, Query query) {
+    _checkInSubs.add(
+      query.orderBy('createdAt', descending: true).limit(100).snapshots().listen(
+        (snap) {
+          _checkInsBySource[source] =
+              snap.docs.map((d) => SafeCheckModel.fromFirestore(d)).toList();
+          _recombine();
+        },
+        onError: (_) {
+          // A denied or failed branch must not blank out the others.
+          _checkInsBySource[source] = const [];
+          _recombine();
+        },
+      ),
+    );
+  }
+
+  void _recombine() {
+    // Branches overlap (a friends-only check-in of my own matches both 'mine'
+    // and 'friends'), so dedupe by document id before sorting.
+    final byId = <String, SafeCheckModel>{};
+    for (final list in _checkInsBySource.values) {
+      for (final c in list) {
+        byId[c.id] = c;
+      }
+    }
+    _checkIns = byId.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    final uid = _viewerUid;
+    if (uid != null) {
+      final my = _checkIns.where((c) => c.userId == uid && c.isActive).toList();
+      _myLatestCheckIn = my.isNotEmpty ? my.first : null;
+    }
+    notifyListeners();
   }
 
   List<SafeCheckModel> nearbyCheckIns(String city) =>
@@ -1582,14 +2469,35 @@ class SafeCheckProvider extends ChangeNotifier {
     required String status, String? message, required String city,
     double? lat, double? lng, required String userId,
     required String userName, String? userPhotoUrl,
+    // H18: denormalised from the author's SafeCheck Visibility setting so
+    // firestore.rules can enforce it. Defaults to the widest setting, matching
+    // the previous behaviour for anyone who never touched the control.
+    String visibility = 'all',
   }) async {
     _loading = true; notifyListeners();
     final now = DateTime.now();
+
+    // For "Friends Only", capture the author's followers as the audience. Read
+    // once at write time; the 24h expiry bounds how stale it can get.
+    var visibleTo = const <String>[];
+    if (!isMock && visibility == 'friends') {
+      try {
+        final followers = await _db
+            .collection('users').doc(userId).collection('followers').get();
+        visibleTo = followers.docs.map((d) => d.id).toList();
+      } catch (_) {
+        // Fail closed: an empty audience hides the check-in from everyone but
+        // its author, which is the safer error for a privacy control.
+        visibleTo = const [];
+      }
+    }
+
     final checkIn = SafeCheckModel(
       id: 'sc_${now.millisecondsSinceEpoch}', userId: userId,
       userName: userName, userPhotoUrl: userPhotoUrl,
       status: status, message: message, city: city, lat: lat, lng: lng,
-      createdAt: now, expiresAt: now.add(const Duration(hours: 24)));
+      createdAt: now, expiresAt: now.add(const Duration(hours: 24)),
+      visibility: visibility, visibleTo: visibleTo);
     if (isMock) {
       _checkIns.removeWhere((c) => c.userId == userId && c.isActive);
       _checkIns.insert(0, checkIn);
@@ -1615,5 +2523,11 @@ class SafeCheckProvider extends ChangeNotifier {
   }
 
   @override
-  void dispose() { _checkInSub?.cancel(); super.dispose(); }
+  void dispose() {
+    for (final sub in _checkInSubs) {
+      sub.cancel();
+    }
+    _checkInSubs.clear();
+    super.dispose();
+  }
 }

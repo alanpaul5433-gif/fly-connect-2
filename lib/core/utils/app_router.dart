@@ -24,6 +24,7 @@ import '../../features/events/event_details_screen.dart';
 import '../../features/events/create_group_screen.dart';
 import '../../features/profile/profile_screen.dart';
 import '../../features/profile/edit_profile_screen.dart';
+import '../../features/home/saved_posts_screen.dart';
 import '../../features/profile/edit_profile_details_screen.dart';
 import '../../features/chat/chat_screen.dart';
 import '../../features/chat/conversation_screen.dart';
@@ -37,6 +38,7 @@ import '../../features/trips/trips_screen.dart';
 import '../../features/groups/groups_screen.dart';
 import '../../features/groups/group_details_screen.dart';
 import '../../features/home/create_post_screen.dart';
+import '../../features/home/post_by_id_screen.dart';
 import '../../features/business/business_shell.dart';
 import '../../features/business/group_management_screen.dart';
 import '../../features/business/event_management_screen.dart';
@@ -50,6 +52,7 @@ import '../../features/admin/admin_dashboard_page.dart';
 import '../../features/admin/admin_users_page.dart';
 import '../../features/admin/admin_content_page.dart';
 import '../../features/admin/admin_safecheck_page.dart';
+import '../../features/admin/admin_nearby_page.dart';
 import '../../features/admin/admin_events_page.dart';
 import '../../features/admin/admin_analytics_page.dart';
 import '../../features/admin/admin_notifications_page.dart';
@@ -69,6 +72,11 @@ final _adminShellKey    = GlobalKey<NavigatorState>(debugLabel: 'admin-shell');
 final GoRouter appRouter = GoRouter(
   initialLocation: AppRoutes.splash,
   debugLogDiagnostics: false,
+  // Catches unmatched/malformed *locations* (e.g. a stale or hand-typed deep
+  // link) so they land on NotFoundScreen instead of GoRouter's raw error
+  // widget. Does not catch exceptions thrown while building an
+  // already-matched screen — that's a different failure mode.
+  errorBuilder: (_, __) => const NotFoundScreen(),
   redirect: (context, state) {
     final loc = state.matchedLocation;
 
@@ -94,7 +102,22 @@ final GoRouter appRouter = GoRouter(
           return role == 'business' ? '/dashboard' : AppRoutes.home;
         }
 
-        if ((loc == '/dashboard' || loc == '/promotions' || loc == '/business-events') &&
+        // Self-heal: a business/admin account that ends up on the crew home
+        // (e.g. splash resolved the role after the initial route decision)
+        // gets corrected on the next navigation instead of staying stuck.
+        if (loc == AppRoutes.home && role != 'user') {
+          return role == 'admin' ? AppRoutes.adminDashboard : '/dashboard';
+        }
+
+        if ((loc == '/dashboard' || loc == '/promotions' || loc == '/business-events' ||
+             loc == '/promotions/create' || loc == '/analytics' || loc == '/business-profile') &&
+            role != 'business' && role != 'admin') {
+          return AppRoutes.home;
+        }
+
+        // Event/Group creation is business-only (admins allowed for moderation).
+        // Catches deep-links / direct navigation; the UI also hides the buttons.
+        if ((loc == '/create-event' || loc == AppRoutes.createGroup) &&
             role != 'business' && role != 'admin') {
           return AppRoutes.home;
         }
@@ -148,6 +171,7 @@ final GoRouter appRouter = GoRouter(
         GoRoute(path: AppRoutes.adminUsers, builder: (_, __) => const AdminUsersPage()),
         GoRoute(path: AppRoutes.adminContent, builder: (_, __) => const AdminContentPage()),
         GoRoute(path: AppRoutes.adminSafeCheck, builder: (_, __) => const AdminSafeCheckPage()),
+        GoRoute(path: AppRoutes.adminNearby, builder: (_, __) => const AdminNearbyPage()),
         GoRoute(path: AppRoutes.adminEvents, builder: (_, __) => const AdminEventsPage()),
         GoRoute(path: AppRoutes.adminAnalytics, builder: (_, __) => const AdminAnalyticsPage()),
         GoRoute(path: AppRoutes.adminNotifications, builder: (_, __) => const AdminNotificationsPage()),
@@ -172,6 +196,7 @@ final GoRouter appRouter = GoRouter(
     GoRoute(path: AppRoutes.notifications, builder: (_, __) => const NotificationsScreen()),
     GoRoute(path: AppRoutes.search, builder: (_, __) => const SearchScreen()),
     GoRoute(path: AppRoutes.trips, builder: (_, __) => const TripsScreen()),
+    GoRoute(path: AppRoutes.savedPosts, builder: (_, __) => const SavedPostsScreen()),
     GoRoute(path: AppRoutes.matchPreferences, builder: (_, __) => const MatchPreferencesScreen()),
     GoRoute(path: '/groups-list', builder: (_, __) => const GroupsScreen()),
 
@@ -185,40 +210,44 @@ final GoRouter appRouter = GoRouter(
         chatId: state.pathParameters['chatId'] ?? '',
         otherName: state.uri.queryParameters['name'] ?? 'Chat',
         otherPhotoUrl: state.uri.queryParameters['photo'],
+        otherUid: state.uri.queryParameters['otherUid'],
         isGroup: state.uri.queryParameters['group'] == 'true')),
 
     GoRoute(path: '/groups/:groupId',
       builder: (_, state) => GroupDetailsScreen(groupId: state.pathParameters['groupId'] ?? '')),
+
+    GoRoute(path: '/posts/:postId',
+      builder: (_, state) => PostByIdScreen(postId: state.pathParameters['postId'] ?? '')),
 
     GoRoute(path: '/passport/:userId',
       builder: (_, state) => TripsScreen(userId: state.pathParameters['userId'])),
 
     GoRoute(path: '/create-post', builder: (_, __) => const CreatePostScreen()),
     GoRoute(path: '/business-group-management',
-      builder: (context, __) {
-        final groups = context.read<GroupProvider>().groups;
-        if (groups.isEmpty) {
-          return const NotFoundScreen(
-            title: 'No groups yet',
-            message: 'Create a group first from your dashboard to manage it.',
-          );
+      builder: (_, state) {
+        // A specific group MUST be passed via extra (e.g. from the group
+        // list tile the user tapped) — there is no safe way to guess which
+        // group to manage, and falling back to "the first group" previously
+        // meant every business user landed on the same globally-top group.
+        if (state.extra is GroupModel) {
+          return GroupManagementScreen(group: state.extra as GroupModel);
         }
-        return GroupManagementScreen(group: groups.first);
+        return const NotFoundScreen(
+          title: 'No group selected',
+          message: 'Open a group from your dashboard to manage it.',
+        );
       }),
     GoRoute(path: '/business-event-management',
-      builder: (context, state) {
-        // Prefer an event passed via GoRouter extra (from _EventCard.onPressed)
+      builder: (_, state) {
+        // A specific event MUST be passed via extra (e.g. from the event
+        // card the user tapped) — same reasoning as group management above.
         if (state.extra is EventModel) {
           return EventManagementScreen(event: state.extra as EventModel);
         }
-        final events = context.read<EventProvider>().events;
-        if (events.isEmpty) {
-          return const NotFoundScreen(
-            title: 'No events yet',
-            message: 'Create an event first from your dashboard to manage it.',
-          );
-        }
-        return EventManagementScreen(event: events.first);
+        return const NotFoundScreen(
+          title: 'No event selected',
+          message: 'Open an event from your dashboard to manage it.',
+        );
       }),
     GoRoute(path: '/business-profile',
       builder: (_, __) => const BusinessProfileScreen(isOwner: true)),

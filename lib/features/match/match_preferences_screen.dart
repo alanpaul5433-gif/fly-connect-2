@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
+import '../../shared/providers/auth_provider.dart';
+import '../../shared/providers/user_provider.dart';
 
 class MatchPreferencesScreen extends StatefulWidget {
   const MatchPreferencesScreen({super.key});
@@ -18,6 +21,72 @@ class _MatchPreferencesScreenState extends State<MatchPreferencesScreen> {
   static const _airlines = ['Delta', 'United', 'American', 'Southwest', 'JetBlue', 'Alaska', 'Spirit'];
   static const _positions = ['Pilot', 'Flight Attendant', 'Gate Agent', 'Ground Crew', 'TSA'];
 
+  String? _uid;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPrefs();
+  }
+
+  /// Hydrate the form from the user's saved matchPrefs so reopening the screen
+  /// shows the last saved values. (Previously this was a pure-local stub that
+  /// reset on every open and Save discarded everything.)
+  Future<void> _loadPrefs() async {
+    final uid = context.read<AuthProvider>().currentUser?.uid;
+    _uid = uid;
+    if (uid == null) return;
+    final prefs = await context.read<UserProvider>().getMatchPrefs(uid);
+    if (!mounted || prefs.isEmpty) return;
+    setState(() {
+      _maxDistance = (prefs['maxDistance'] as num?)?.toDouble() ?? _maxDistance;
+      final ageMin = (prefs['ageMin'] as num?)?.toDouble();
+      final ageMax = (prefs['ageMax'] as num?)?.toDouble();
+      if (ageMin != null && ageMax != null) _ageRange = RangeValues(ageMin, ageMax);
+      _sameAirline = prefs['sameAirline'] == true;
+      _verifiedOnly = prefs['verifiedOnly'] == true;
+      _selectedAirlines
+        ..clear()
+        ..addAll(List<String>.from(prefs['airlines'] ?? const <String>[]));
+      _selectedPositions
+        ..clear()
+        ..addAll(List<String>.from(prefs['positions'] ?? const <String>[]));
+    });
+  }
+
+  /// Persist the form to users/{uid}.matchPrefs. MatchProvider.loadCandidates
+  /// reads these back (airline / position / verified applied today; age and
+  /// distance are saved but not yet filtered — no DOB/geo on UserModel).
+  Future<void> _save() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    final userProvider = context.read<UserProvider>();
+    final uid = _uid;
+    if (uid == null) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Please sign in to save preferences.'),
+        backgroundColor: Colors.red));
+      return;
+    }
+    try {
+      await userProvider.saveMatchPrefs(uid, {
+        'maxDistance': _maxDistance.round(),
+        'ageMin': _ageRange.start.round(),
+        'ageMax': _ageRange.end.round(),
+        'sameAirline': _sameAirline,
+        'verifiedOnly': _verifiedOnly,
+        'airlines': _selectedAirlines,
+        'positions': _selectedPositions,
+      });
+      if (!mounted) return;
+      messenger.showSnackBar(const SnackBar(content: Text('Preferences saved')));
+      navigator.pop();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('Could not save: $e'), backgroundColor: Colors.red));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -27,7 +96,7 @@ class _MatchPreferencesScreenState extends State<MatchPreferencesScreen> {
         leading: IconButton(icon: const Icon(Icons.close, color: Colors.black), onPressed: () => Navigator.pop(context)),
         title: const Text('Match Preferences', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context),
+          TextButton(onPressed: _save,
             // Save sits on a white AppBar — primary fails AA. Use dark.
             child: const Text('Save', style: TextStyle(color: AppColors.dark, fontWeight: FontWeight.bold, fontSize: 16))),
         ],

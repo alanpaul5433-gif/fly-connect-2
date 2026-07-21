@@ -30,6 +30,25 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
     _fetchFirstPage();
   }
 
+  /// PII (email, phone) lives in the owner-only `users/{uid}/private/data`
+  /// subdoc, not the main doc the list query above reads — see H-2 in
+  /// docs/QA_AUDIT_REPORT.md. Admins are allowed to read it
+  /// (firestore.rules `private/{docId}` — `isOwner(userId) || isAdmin()`),
+  /// so we fan out one extra read per row to merge it back in for the list/
+  /// detail/search UI, which is a normal cost for an internal admin tool.
+  Future<List<Map<String, dynamic>>> _withPrivateData(
+      List<Map<String, dynamic>> docs) async {
+    return Future.wait(docs.map((data) async {
+      final uid = data['uid'] as String;
+      try {
+        final privateDoc = await FirebaseFirestore.instance
+            .collection('users').doc(uid).collection('private').doc('data').get();
+        if (privateDoc.exists) return {...data, ...privateDoc.data()!};
+      } catch (_) {/* fail open — list still renders without email/phone */}
+      return data;
+    }));
+  }
+
   Future<void> _fetchFirstPage() async {
     setState(() { _loading = true; _lastDoc = null; _hasMore = true; });
     try {
@@ -38,12 +57,15 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
           .limit(_pageSize)
           .get();
       if (!mounted) return;
+      final docs = snapshot.docs.map((doc) {
+        final data = doc.data();
+        data['uid'] = doc.id;
+        return data;
+      }).toList();
+      final withPrivate = await _withPrivateData(docs);
+      if (!mounted) return;
       setState(() {
-        _users = snapshot.docs.map((doc) {
-          final data = doc.data();
-          data['uid'] = doc.id;
-          return data;
-        }).toList();
+        _users = withPrivate;
         _lastDoc = snapshot.docs.isNotEmpty ? snapshot.docs.last : null;
         _hasMore = snapshot.docs.length == _pageSize;
         _loading = false;
@@ -68,8 +90,10 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
         data['uid'] = doc.id;
         return data;
       }).toList();
+      final withPrivate = await _withPrivateData(newDocs);
+      if (!mounted) return;
       setState(() {
-        _users.addAll(newDocs);
+        _users.addAll(withPrivate);
         _lastDoc = snapshot.docs.isNotEmpty ? snapshot.docs.last : _lastDoc;
         _hasMore = snapshot.docs.length == _pageSize;
         _loadingMore = false;

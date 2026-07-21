@@ -6,6 +6,7 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/providers/providers.dart';
 import '../../shared/providers/event_provider.dart';
+import '../../shared/widgets/verified_badge.dart';
 
 class BusinessProfileScreen extends StatefulWidget {
   final bool isOwner;
@@ -83,7 +84,7 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(child: Text(biz.name, style: AppTextStyles.h2)),
-              if (biz.isVerified) const Icon(Icons.verified, color: AppColors.primary, size: 22),
+              if (biz.isVerified) const VerifiedBadge(size: 22),
             ]),
             const SizedBox(height: 4),
 
@@ -117,7 +118,7 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
               child: Row(children: [
                 const Expanded(child: _StatItem(value: '2,840', label: 'Followers')),
                 _VertDivider(),
-                Expanded(child: _StatItem(value: '$promoCount', label: 'Promotions')),
+                Expanded(child: _StatItem(value: '$promoCount', label: 'Crew Deals')),
                 _VertDivider(),
                 const Expanded(child: _StatItem(value: '3', label: 'Events')),
                 _VertDivider(),
@@ -158,11 +159,11 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
 
             const SizedBox(height: 20),
 
-            const Text('Active Promotions', style: AppTextStyles.labelLarge),
+            const Text('Active Deals', style: AppTextStyles.labelLarge),
             const SizedBox(height: 12),
 
             if (activePromos.isEmpty)
-              const Text('No active promotions', style: AppTextStyles.caption)
+              const Text('No active deals', style: AppTextStyles.caption)
             else
               SizedBox(
                 height: 160,

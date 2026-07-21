@@ -28,12 +28,14 @@ class AppRoutes {
   static const matchPreferences = '/match-preferences';
   static const safeCheckHistory = '/safe-check-history';
   static const offers           = '/offers';       // crew-facing promotions browser
+  static const savedPosts       = '/saved-posts';
 
   // Admin Dashboard
   static const adminDashboard     = '/admin/dashboard';
   static const adminUsers         = '/admin/users';
   static const adminContent       = '/admin/content';
   static const adminSafeCheck     = '/admin/safecheck';
+  static const adminNearby        = '/admin/nearby';
   static const adminEvents        = '/admin/events';
   static const adminAnalytics     = '/admin/analytics';
   static const adminNotifications = '/admin/notifications';

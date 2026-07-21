@@ -26,7 +26,7 @@ This guide walks you from "no Play Console account" to "app live in Internal Tes
 
 - **Developer name:** `AppCurb Technologies` — this appears next to your app in the Play Store
 - **Website:** `https://appcurb.com` (or your company site)
-- **Support email:** `support@flyconnect.app`
+- **Support email:** `support@flyconnect.co`
 - **Support phone/URL:** optional
 
 ### 1.3 Enable two-step verification

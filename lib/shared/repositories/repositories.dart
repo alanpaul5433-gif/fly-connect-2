@@ -373,9 +373,16 @@ class ChatRepository {
       final chat = ChatModel.fromFirestore(doc);
       if (chat.participants.contains(otherUid)) return doc.id;
     }
+    final docs = await Future.wait([
+      _db.collection('users').doc(uid).get(),
+      _db.collection('users').doc(otherUid).get(),
+    ]);
     final ref = _db.collection('chats').doc();
     await ref.set({
       'type': 'dm', 'participants': [uid, otherUid],
+      'participantNames': ChatModel.namesMap(
+        meUid: uid, meName: docs[0].data()?['name'] as String?,
+        otherUid: otherUid, otherName: docs[1].data()?['name'] as String?),
       'createdBy': uid, 'unreadCount': {}, 'createdAt': FieldValue.serverTimestamp(),
     });
     return ref.id;

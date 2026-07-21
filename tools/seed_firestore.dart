@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../lib/core/config/firebase_config.dart';
+import 'package:flyconnect/core/config/firebase_config.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -143,8 +143,7 @@ class _SeedButtonState extends State<_SeedButton> {
       final events = [
         {'title': 'Airport Crew Meetup — NYC', 'desc': 'Monthly gathering for all JFK/LGA/EWR based crew. Food, drinks, and great conversations.', 'loc': 'The Sky Lounge, Queens, NY', 'days': 5, 'time': '7:00 PM', 'creator': 0, 'rsvp': 47, 'approved': true, 'featured': true},
         {'title': 'Pilot Social — Chicago', 'desc': 'Casual evening for pilots and co-pilots based at ORD and MDW.', 'loc': "O'Hare Marriott, Chicago", 'days': 12, 'time': '6:30 PM', 'creator': 2, 'rsvp': 28, 'approved': true, 'featured': false},
-        {'title': 'Flight Attendant Workshop', 'desc': 'Professional development covering wellness, career growth, and work-life balance.', 'loc': 'LAX Hilton, Los Angeles', 'days': 18, 'time': '10:00 AM', 'creator': 1, 'rsvp': 62, 'approved': true, 'featured': true},
-        {'title': 'Crew Trivia Night', 'desc': 'Aviation-themed trivia night! Teams of 4-6. Prizes for top 3 teams.', 'loc': 'Gate B Bar, Denver Airport Area', 'days': 3, 'time': '8:00 PM', 'creator': 4, 'rsvp': 34, 'approved': true, 'featured': false},
+        // Trimmed to 2 well-configured events for initial client testing.
       ];
 
       for (int i = 0; i < events.length; i++) {
@@ -164,8 +163,7 @@ class _SeedButtonState extends State<_SeedButton> {
       final groups = [
         {'name': 'Delta Crew NYC', 'desc': 'Official group for all Delta employees based in the New York area.', 'creator': 0, 'members': [0, 1, 2], 'count': 342, 'tags': ['Delta', 'NYC', 'Aviation'], 'pinned': true},
         {'name': 'Layover Adventures', 'desc': 'For crew who love exploring cities during layovers.', 'creator': 5, 'members': [0, 5, 3], 'count': 1247, 'tags': ['Travel', 'Layover', 'Food'], 'pinned': true},
-        {'name': 'Aviation Photography', 'desc': 'Share your best aviation shots — cockpit sunrises, wing views.', 'creator': 1, 'members': [1, 5], 'count': 567, 'tags': ['Photography', 'Aviation'], 'pinned': false},
-        {'name': 'Ground Crew United', 'desc': 'A community for all ground operations staff.', 'creator': 4, 'members': [4], 'count': 891, 'tags': ['Ground', 'Ramp', 'Operations'], 'pinned': false},
+        // Trimmed to 2 well-configured groups for initial client testing.
       ];
 
       for (int i = 0; i < groups.length; i++) {
@@ -267,7 +265,7 @@ class _SeedButtonState extends State<_SeedButton> {
         });
       }
 
-      setState(() => _status = 'Done! Seeded 7 users, 9 posts, 4 events, 4 groups, 3 promotions, 6 notifications, 4 SafeChecks, 5 trips');
+      setState(() => _status = 'Done! Seeded 7 users, 9 posts, 2 events, 2 groups, 3 promotions, 6 notifications, 4 SafeChecks, 5 trips');
     } catch (e) {
       setState(() => _status = 'Error: $e');
     }

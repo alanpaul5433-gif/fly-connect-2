@@ -11,6 +11,7 @@ import '../../shared/models/models.dart';
 import '../../shared/widgets/skeleton.dart';
 import '../../shared/widgets/shared_widgets.dart';
 import '../../shared/widgets/inline_error_banner.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -226,16 +227,17 @@ class _ChatTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final unread = chat.unreadCount[currentUid] ?? 0;
     final isGroup = chat.type == 'group';
-    final name = isGroup ? (chat.groupName ?? 'Group') : _otherName(chat, currentUid);
+    final name = chat.displayNameFor(currentUid);
+    final otherUid = chat.otherUidFor(currentUid);
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: Stack(children: [
-        CircleAvatar(radius: 26,
+        CachedAvatar(
+          url: isGroup ? chat.groupPhotoUrl : null,
+          radius: 26,
           backgroundColor: isGroup ? AppColors.dark : AppColors.backgroundGrey,
-          backgroundImage: (isGroup ? chat.groupPhotoUrl : null) != null
-            ? NetworkImage(isGroup ? chat.groupPhotoUrl! : '') : null,
-          child: (isGroup && chat.groupPhotoUrl == null)
+          fallback: (isGroup && chat.groupPhotoUrl == null)
             ? const Icon(Icons.group, color: AppColors.primary)
             : null),
         Positioned(bottom: 0, right: 0,
@@ -265,20 +267,8 @@ class _ChatTile extends StatelessWidget {
             child: Center(child: Text(unread > 9 ? '9+' : '$unread',
               style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)))),
       ]),
-      onTap: () => context.push('/conversation/${chat.id}?name=${Uri.encodeComponent(name)}&group=$isGroup'),
+      onTap: () => context.push('/conversation/${chat.id}?name=${Uri.encodeComponent(name)}&group=$isGroup'
+          '${otherUid != null && otherUid.isNotEmpty ? '&otherUid=$otherUid' : ''}'),
     );
-  }
-
-  String _otherName(ChatModel chat, String uid) {
-    // Prefer a name embedded on the chat doc (set when the DM was created);
-    // fall back to the group name or a generic "User". We no longer look
-    // up against mockUsers — the chat doc should carry the participant name.
-    final names = (chat as dynamic).participantNames;
-    if (names is Map) {
-      final otherUid = chat.participants.firstWhere((p) => p != uid, orElse: () => '');
-      final name = names[otherUid];
-      if (name is String && name.isNotEmpty) return name;
-    }
-    return chat.groupName ?? 'User';
   }
 }

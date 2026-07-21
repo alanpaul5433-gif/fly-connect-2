@@ -6,8 +6,11 @@ import 'package:intl/intl.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/providers/event_provider.dart';
+import '../../shared/providers/user_provider.dart';
 import '../../shared/models/models.dart';
 import '../../shared/widgets/shared_widgets.dart';
+import '../../shared/widgets/cached_image.dart';
+import '../../shared/widgets/organizer_row.dart';
 
 class EventDetailsScreen extends StatefulWidget {
   final String? eventId;
@@ -17,6 +20,7 @@ class EventDetailsScreen extends StatefulWidget {
 
 class _EventDetailsScreenState extends State<EventDetailsScreen> {
   EventModel? _event;
+  UserModel? _organizer;
   bool _loading = true;
   bool _hasError = false;
   bool _rsvpd = false;
@@ -32,11 +36,14 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     setState(() { _loading = true; _hasError = false; });
     if (widget.eventId == null) { setState(() => _loading = false); return; }
     try {
-      final events = context.read<EventProvider>().events;
+      final eventProvider = context.read<EventProvider>();
+      final userProvider = context.read<UserProvider>();
+      final events = eventProvider.events;
       final match = events.where((e) => e.id == widget.eventId).firstOrNull;
       if (match != null) {
-        final rsvpd = await context.read<EventProvider>().hasRsvped(match.id);
-        if (mounted) setState(() { _event = match; _rsvpd = rsvpd; _loading = false; });
+        final rsvpd = await eventProvider.hasRsvped(match.id);
+        final organizer = await userProvider.fetchUser(match.createdBy);
+        if (mounted) setState(() { _event = match; _organizer = organizer; _rsvpd = rsvpd; _loading = false; });
       } else {
         if (mounted) setState(() => _loading = false);
       }
@@ -99,7 +106,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             IconButton(
               icon: const Icon(Icons.share_outlined, color: Colors.white),
               onPressed: () {
-                final link = 'https://flyconnect.app/events/${e.id}';
+                final link = 'https://flyconnect.co/events/${e.id}';
                 Clipboard.setData(ClipboardData(text: link));
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                   content: Text('Event link copied to clipboard'),
@@ -111,8 +118,8 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
           flexibleSpace: FlexibleSpaceBar(
             background: Stack(fit: StackFit.expand, children: [
               e.imageUrl != null
-                ? Image.network(e.imageUrl!, fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(color: AppColors.dark))
+                ? CachedFeedImage(url: e.imageUrl!, fit: BoxFit.cover,
+                    errorWidget: Container(color: AppColors.dark))
                 : Container(color: AppColors.dark,
                     child: const Center(child: Icon(Icons.event, color: AppColors.primary, size: 72))),
               Container(decoration: BoxDecoration(
@@ -130,6 +137,10 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
               decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(6)),
               child: const Text('FEATURED', style: TextStyle(color: AppColors.dark, fontSize: 11, fontWeight: FontWeight.w800))),
             Text(e.title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            if (_organizer != null) ...[
+              const SizedBox(height: 8),
+              OrganizerRow(organizer: _organizer!),
+            ],
             const SizedBox(height: 16),
             _InfoRow(icon: Icons.calendar_today_outlined,
               text: '${DateFormat('EEEE, MMM d, y').format(e.date)} · ${e.time}'),

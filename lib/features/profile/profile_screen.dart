@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../core/constants/app_routes.dart';
@@ -11,9 +14,10 @@ import '../../shared/providers/post_provider.dart';
 import '../../shared/providers/chat_provider.dart';
 import '../../shared/utils/open_chat.dart';
 import '../../shared/models/models.dart';
-import '../../shared/mock/story_state.dart';
 import '../home/story_viewer_screen.dart';
 import '../home/post_details_screen.dart';
+import '../../shared/widgets/cached_image.dart';
+import '../../shared/widgets/verified_badge.dart';
 
 class ProfileScreen extends StatefulWidget {
   final bool isOwner;
@@ -31,6 +35,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   // If either party has blocked the other, hide the whole profile.
   // Mirrors the Nearby map's both-direction block filter.
   bool _blockedRelationship = false;
+  String? _myStoryUrl;
 
   @override
   void initState() {
@@ -47,6 +52,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       _user = userProvider.currentUser ??
           (auth.currentUser == null ? null :
           await userProvider.fetchUser(auth.currentUser!.uid));
+      if (_user != null) _myStoryUrl = await userProvider.getMyStory(_user!.uid);
     } else {
       _user = await userProvider.fetchUser(widget.userId!);
       if (_user != null && auth.currentUser != null) {
@@ -167,8 +173,51 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       );
     }
 
-    final u = _user!;
     final isMe = widget.isOwner || widget.userId == null;
+    // Respect "Public Profile" — a private account is only visible to itself
+    // and accounts it has accepted a follow from.
+    if (!isMe && !_following && _user!.settings['profilePublic'] == false) {
+      return Scaffold(
+        appBar: AppBar(
+          leading: const BackButton(color: Colors.black),
+          backgroundColor: Colors.white,
+          elevation: 0,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(40),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.lock_outline,
+                      size: 28, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 16),
+                const Text('This profile is private',
+                    style: TextStyle(
+                        fontSize: 17, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                const Text(
+                  'Follow this account to see their posts and info.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: AppColors.textSecondary, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final u = _user!;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -196,8 +245,8 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             flexibleSpace: FlexibleSpaceBar(
               background: Stack(fit: StackFit.expand, children: [
                 u.photoUrl != null
-                  ? Image.network(u.photoUrl!, fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(color: AppColors.dark))
+                  ? CachedFeedImage(url: u.photoUrl!, fit: BoxFit.cover,
+                      errorWidget: Container(color: AppColors.dark))
                   : Container(color: AppColors.dark,
                       child: Center(child: Text(u.name.isNotEmpty ? u.name[0] : '?',
                         style: const TextStyle(color: AppColors.primary, fontSize: 72, fontWeight: FontWeight.bold)))),
@@ -215,17 +264,22 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             Row(children: [
               GestureDetector(
                 onTap: () {
-                  if (isMe && StoryState.instance.myStoryBytes != null) {
+                  if (isMe && _myStoryUrl != null) {
+                    final userProvider = context.read<UserProvider>();
                     Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => StoryViewerScreen(user: u, imageBytes: StoryState.instance.myStoryBytes),
-                    ));
+                      builder: (_) => StoryViewerScreen(
+                          user: u, storyImageUrl: _myStoryUrl!, isOwn: true),
+                    )).then((_) async {
+                      final url = await userProvider.getMyStory(u.uid);
+                      if (mounted) setState(() => _myStoryUrl = url);
+                    });
                   }
                 },
                 child: Container(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: isMe && StoryState.instance.myStoryBytes != null
+                      color: isMe && _myStoryUrl != null
                           ? const Color(0xFFD4F53C)
                           : AppColors.primary,
                       width: 3,
@@ -243,7 +297,15 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                 _ActionIcon(icon: Icons.settings_outlined, onTap: () => context.push(AppRoutes.settings)),
                 const SizedBox(width: 10),
                 _PillBtn(label: 'Edit Profile', filled: true,
-                  onTap: () => context.push(AppRoutes.editProfileDetails)),
+                  // Opens the core profile editor (avatar / name / bio / airline).
+                  // The "looking for & interests" screen (editProfileDetails) is
+                  // still reachable via Settings → Edit Profile.
+                  // Reload on return so edits (e.g. a new avatar) show right away
+                  // instead of only after the next cold start.
+                  onTap: () async {
+                    await context.push(AppRoutes.editProfile);
+                    if (mounted) await _loadUser();
+                  }),
               ] else ...[
                 _ActionIcon(icon: Icons.chat_bubble_outline, onTap: _openChat),
                 const SizedBox(width: 10),
@@ -253,8 +315,19 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             ]),
             const SizedBox(height: 12),
             // Name, airline, position
-            Text(u.name, style: AppTextStyles.h4),
-            if (u.airline != null || u.position != null)
+            Row(children: [
+              Flexible(child: Text(u.name, style: AppTextStyles.h4, overflow: TextOverflow.ellipsis)),
+              if (u.isVerified) ...[const SizedBox(width: 6), const VerifiedBadge()],
+            ]),
+            if (u.role == 'business') ...[
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(color: AppColors.dark, borderRadius: BorderRadius.circular(100)),
+                child: Text(u.position ?? 'Business',
+                  style: const TextStyle(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+            ] else if (u.airline != null || u.position != null)
               Text('${u.airline ?? ''} ${u.position != null ? '· ${u.position}' : ''}',
                 style: AppTextStyles.bodyMedium.copyWith(color: AppColors.primary)),
             if (u.airport != null)
@@ -414,14 +487,173 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
         if (isMe) ...[
-          ListTile(leading: const Icon(Icons.qr_code), title: const Text('Share profile'), onTap: () => Navigator.pop(context)),
+          ListTile(leading: const Icon(Icons.share_outlined), title: const Text('Share profile'), onTap: () { Navigator.pop(context); _shareProfile(); }),
+          ListTile(leading: const Icon(Icons.qr_code), title: const Text('My QR code'), onTap: () { Navigator.pop(context); _showMyQr(); }),
+          ListTile(leading: const Icon(Icons.bookmark_border), title: const Text('Saved posts'), onTap: () { Navigator.pop(context); context.push(AppRoutes.savedPosts); }),
           ListTile(leading: const Icon(Icons.lock_outline), title: const Text('Privacy settings'), onTap: () { Navigator.pop(context); context.push(AppRoutes.settings); }),
         ] else ...[
-          ListTile(leading: const Icon(Icons.share_outlined), title: const Text('Share profile'), onTap: () => Navigator.pop(context)),
-          ListTile(leading: const Icon(Icons.block, color: Colors.red), title: const Text('Block user', style: TextStyle(color: Colors.red)), onTap: () => Navigator.pop(context)),
-          ListTile(leading: const Icon(Icons.flag_outlined, color: Colors.red), title: const Text('Report user', style: TextStyle(color: Colors.red)), onTap: () => Navigator.pop(context)),
+          ListTile(leading: const Icon(Icons.share_outlined), title: const Text('Share profile'), onTap: () { Navigator.pop(context); _shareProfile(); }),
+          ListTile(leading: const Icon(Icons.block, color: Colors.red), title: const Text('Block user', style: TextStyle(color: Colors.red)), onTap: () { Navigator.pop(context); _confirmBlockUser(); }),
+          ListTile(leading: const Icon(Icons.flag_outlined, color: Colors.red), title: const Text('Report user', style: TextStyle(color: Colors.red)), onTap: () { Navigator.pop(context); _reportUser(); }),
         ],
       ])));
+  }
+
+  /// Canonical shareable profile URL. Matches the in-app `/users/:userId` route
+  /// (app_router.dart) and the link shape used for promotions. Deep linking is
+  /// deferred for v1.0, so this opens on the web — it does not reopen the app yet.
+  String _profileUrl(UserModel u) => 'https://flyconnect.co/users/${u.uid}';
+
+  /// Share the viewed profile via the native OS share sheet. `_user` holds the
+  /// correct profile for both the own-profile and other-profile cases.
+  Future<void> _shareProfile() async {
+    final u = _user;
+    if (u == null) return;
+    final url = _profileUrl(u);
+    try {
+      await SharePlus.instance.share(
+        ShareParams(text: '${u.name} on FlyConnect\n$url', subject: '${u.name} on FlyConnect'),
+      );
+    } catch (_) {
+      // Fallback if the native share sheet is unavailable (e.g. web/desktop):
+      // copy the link, mirroring the promotions share pattern.
+      if (!mounted) return;
+      await Clipboard.setData(ClipboardData(text: url));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile link copied to clipboard')),
+      );
+    }
+  }
+
+  /// Show a scannable QR code of the profile URL (own-profile only). Rendered on
+  /// a white card so the default black QR modules stay readable on the dark sheet.
+  void _showMyQr() {
+    final u = _user;
+    if (u == null) return;
+    final url = _profileUrl(u);
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(u.name, style: AppTextStyles.h3, textAlign: TextAlign.center),
+            const SizedBox(height: 4),
+            const Text('Scan to view profile', style: AppTextStyles.caption, textAlign: TextAlign.center),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+              child: QrImageView(data: url, version: QrVersions.auto, size: 220, backgroundColor: Colors.white),
+            ),
+            const SizedBox(height: 20),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+              FilledButton.icon(
+                onPressed: () { Navigator.pop(ctx); _shareProfile(); },
+                icon: const Icon(Icons.share, size: 18),
+                label: const Text('Share'),
+              ),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// Block the viewed user. The provider write (PostProvider.blockUser) already
+  /// exists and the profile both-direction filter already hides blocked users —
+  /// this just wires the button to it, behind a confirm, then leaves the screen.
+  Future<void> _confirmBlockUser() async {
+    final target = _user;
+    if (target == null) return;
+    final post = context.read<PostProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final router = GoRouter.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Block ${target.name}?'),
+        content: const Text(
+          "They won't be able to message you or see your profile, and they "
+          "won't appear in your chats, matches, or nearby. You can unblock "
+          "later from Settings.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Block',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await post.blockUser(target.uid);
+      if (!mounted) return;
+      setState(() => _blockedRelationship = true);
+      messenger.showSnackBar(
+        SnackBar(content: Text('${target.name} has been blocked')));
+      if (router.canPop()) router.pop();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('Could not block user: $e'),
+        backgroundColor: Colors.red));
+    }
+  }
+
+  /// Report the viewed user to moderation (Apple 1.2 / Play UGC). Persists a
+  /// `reports` doc via PostProvider.reportContent with the chosen reason.
+  Future<void> _reportUser() async {
+    final target = _user;
+    if (target == null) return;
+    final reason = await _pickReportReason();
+    if (reason == null || !mounted) return;
+    final post = context.read<PostProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await post.reportContent(
+        targetType: 'user', targetId: target.uid, reason: reason);
+      if (!mounted) return;
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Thanks — our team will review this report.')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('Could not submit report: $e'),
+        backgroundColor: Colors.red));
+    }
+  }
+
+  /// Canonical report reasons. Returns the chosen reason, or null if dismissed.
+  Future<String?> _pickReportReason() {
+    const reasons = [
+      'Spam or scam',
+      'Harassment or bullying',
+      'Inappropriate or explicit content',
+      'Fake or impersonating profile',
+      'Other',
+    ];
+    return showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('Report this profile',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+          for (final r in reasons)
+            ListTile(title: Text(r), onTap: () => Navigator.pop(ctx, r)),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
   }
 }
 
@@ -470,7 +702,10 @@ class _LikedPostsGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<PostProvider>(
       builder: (context, provider, _) {
-        final posts = provider.feed;
+        // Only posts the user has liked — not the whole feed.
+        final posts = provider.feed
+            .where((p) => provider.likedPostIds.contains(p.id))
+            .toList();
         if (posts.isEmpty) {
           return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(Icons.favorite_border, size: 48, color: Colors.grey.shade300),
@@ -487,8 +722,8 @@ class _LikedPostsGrid extends StatelessWidget {
           itemBuilder: (context, i) {
             final post = posts[i];
             return post.mediaUrls.isNotEmpty
-              ? Image.network(post.mediaUrls.first, fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(color: AppColors.backgroundGrey))
+              ? CachedFeedImage(url: post.mediaUrls.first, fit: BoxFit.cover,
+                  errorWidget: Container(color: AppColors.backgroundGrey))
               : Container(color: AppColors.backgroundGrey,
                   child: Center(child: Text(post.caption.isNotEmpty ? post.caption[0] : '❤️',
                     style: const TextStyle(fontSize: 24))));
@@ -504,9 +739,27 @@ class _PostsGrid extends StatelessWidget {
   const _PostsGrid({required this.userId});
   @override
   Widget build(BuildContext context) {
-    return Consumer<PostProvider>(
-      builder: (context, provider, _) {
-        final posts = provider.feed;
+    // H7: this used to filter `provider.feed` — the newest 25 posts GLOBALLY —
+    // by authorId, so the grid showed a user's posts only if they happened to
+    // land in that window. Now it queries their posts directly.
+    return StreamBuilder<List<PostModel>>(
+      stream: context.read<PostProvider>().watchUserPosts(userId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: CircularProgressIndicator(color: AppColors.primary),
+            ));
+        }
+        if (snapshot.hasError) {
+          return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.error_outline, size: 48, color: Colors.grey.shade300),
+            const SizedBox(height: 8),
+            const Text('Could not load posts', style: TextStyle(color: Colors.grey)),
+          ]));
+        }
+        final posts = snapshot.data ?? const <PostModel>[];
         if (posts.isEmpty) {
           return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(Icons.grid_view_outlined, size: 48, color: Colors.grey.shade300),
@@ -526,8 +779,8 @@ class _PostsGrid extends StatelessWidget {
               onTap: () => Navigator.push(context,
                 MaterialPageRoute(builder: (_) => PostDetailsScreen(post: post))),
               child: post.mediaUrls.isNotEmpty
-                ? Image.network(post.mediaUrls.first, fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(color: AppColors.backgroundGrey))
+                ? CachedFeedImage(url: post.mediaUrls.first, fit: BoxFit.cover,
+                    errorWidget: Container(color: AppColors.backgroundGrey))
                 : Container(color: AppColors.backgroundGrey,
                     child: Center(child: Text(post.caption.isNotEmpty ? post.caption[0] : '📝',
                       style: const TextStyle(fontSize: 24)))));

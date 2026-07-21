@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/providers/providers.dart';
+import 'business_scope.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -59,9 +60,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final bars = _currentBars;
     final maxBar = bars.reduce((a, b) => a > b ? a : b).toDouble();
     final m = _metrics;
-    final promotions = context.watch<PromotionProvider>().promotions;
     // Use real follower count from provider; keep other metrics as trend indicators
-    final realFollowers = context.watch<UserProvider>().currentUser?.followerCount ?? 0;
+    final me = context.watch<UserProvider>().currentUser;
+    final realFollowers = me?.followerCount ?? 0;
+    // H19: scope to THIS business. The provider streams every business's
+    // promotions (the public Crew Deals feed needs them); aggregating that raw
+    // list showed Business A the titles/views/saves/redemptions of Business B.
+    final promotions = ownPromotions(
+        context.watch<PromotionProvider>().promotions, me?.uid);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -179,7 +185,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
           const SizedBox(height: 24),
 
-          const Text('Promotion Performance', style: AppTextStyles.labelLarge),
+          const Text('Crew Deal Performance', style: AppTextStyles.labelLarge),
           const SizedBox(height: 12),
 
           ListView.separated(
@@ -247,7 +253,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           const SizedBox(height: 12),
 
           Consumer<EventProvider>(builder: (_, eventProvider, __) {
-            final events = eventProvider.events.take(3).toList();
+            final uid = context.read<AuthProvider>().currentUser?.uid;
+            // Scope to this business's own events — the unfiltered global
+            // list previously meant "Event Attendance" showed events other
+            // businesses created, and tapping one would open it for
+            // management regardless of who created it.
+            final events = eventProvider.events.where((e) => e.createdBy == uid).take(3).toList();
             if (events.isEmpty) {
               return Container(
                 padding: const EdgeInsets.all(20),
@@ -271,7 +282,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 final e = events[i];
               final progress = (e.rsvpCount / 50).clamp(0.0, 1.0);
               return GestureDetector(
-                onTap: () => context.push('/business-event-management'),
+                onTap: () => context.push('/business-event-management', extra: e),
                 child: Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(

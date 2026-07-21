@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/providers/providers.dart';
+import 'business_scope.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -12,10 +13,14 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = context.watch<UserProvider>().currentUser;
     final name = user?.name ?? 'Business';
-    final activePromoCount = context.watch<PromotionProvider>().activePromotions.length;
-    final totalPromoViews = context.watch<PromotionProvider>().promotions
-        .fold<int>(0, (sum, p) => sum + p.views);
-    final upcomingEventCount = context.watch<EventProvider>().events
+    // H19: every headline number here is scoped to THIS business. Previously
+    // they summed across every business's promotions and events.
+    final myPromos = ownPromotions(
+        context.watch<PromotionProvider>().promotions, user?.uid);
+    final activePromoCount = myPromos.where((p) => p.isActive && p.isApproved).length;
+    final totalPromoViews = myPromos.fold<int>(0, (sum, p) => sum + p.views);
+    final upcomingEventCount = ownEvents(
+        context.watch<EventProvider>().events, user?.uid)
         .where((e) => e.date.isAfter(DateTime.now())).length;
     final followerCount = user?.followerCount ?? 0;
 
@@ -80,7 +85,7 @@ class DashboardScreen extends StatelessWidget {
             childAspectRatio: 1.4,
             children: [
               _StatCard(icon: Icons.people_outline, value: followerCount.toString(), label: 'Followers'),
-              _StatCard(icon: Icons.local_offer_outlined, value: '$activePromoCount', label: 'Active Promotions'),
+              _StatCard(icon: Icons.local_offer_outlined, value: '$activePromoCount', label: 'Active Deals'),
               _StatCard(icon: Icons.event_outlined, value: '$upcomingEventCount', label: 'Upcoming Events'),
               _StatCard(icon: Icons.visibility_outlined, value: '$totalPromoViews', label: 'Promo Views'),
             ],
@@ -93,14 +98,14 @@ class DashboardScreen extends StatelessWidget {
           Row(children: [
             Expanded(child: _QuickAction(
               icon: Icons.local_offer,
-              label: 'Create Promotion',
+              label: 'Create Deal',
               onTap: () => context.push('/promotions/create'),
             )),
             const SizedBox(width: 10),
             Expanded(child: _QuickAction(
               icon: Icons.event,
               label: 'Create Event',
-              onTap: () => context.push('/business-event-management'),
+              onTap: () => context.push('/create-event'),
             )),
             const SizedBox(width: 10),
             Expanded(child: _QuickAction(
@@ -175,8 +180,12 @@ class _QuickAction extends StatelessWidget {
 class _RecentActivitySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final promotions = context.watch<PromotionProvider>().promotions;
-    final events = context.watch<EventProvider>().events;
+    // H19: "recent activity" (top promotion, redemption leader, top event) is
+    // this business's own, not whichever business happens to lead globally.
+    final me = context.watch<UserProvider>().currentUser?.uid;
+    final promotions = ownPromotions(
+        context.watch<PromotionProvider>().promotions, me);
+    final events = ownEvents(context.watch<EventProvider>().events, me);
 
     final items = <_ActivityItem>[];
 
@@ -223,7 +232,7 @@ class _RecentActivitySection extends StatelessWidget {
           color: Colors.white, borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.grey.shade100)),
         child: const Center(
-          child: Text('No activity yet. Create a promotion or event to get started.',
+          child: Text('No activity yet. Create a deal or event to get started.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey, fontSize: 13)),
         ),

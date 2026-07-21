@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart';
-import 'package:firebase_auth/firebase_auth.dart' as fb;
 
 /// Tests for AuthProvider-equivalent logic.
 ///
@@ -59,7 +58,7 @@ void main() {
     });
 
     test('Firestore user doc creation on signup', () async {
-      final uid = 'test-uid-123';
+      const uid = 'test-uid-123';
       await db.collection('users').doc(uid).set({
         'uid': uid,
         'name': 'Test User',
@@ -89,6 +88,64 @@ void main() {
       expect(auth.currentUser, isNotNull);
       await auth.signOut();
       expect(auth.currentUser, isNull);
+    });
+
+    test('business signup doc shape: verificationStatus pending on main doc, '
+        'ein/licenseNumber on the private subdoc', () async {
+      const uid = 'biz-uid-1';
+      await db.collection('users').doc(uid).set({
+        'uid': uid,
+        'name': 'Sky Lounge',
+        'email': 'lounge@delta.com',
+        'role': 'business',
+        'isBanned': false,
+        'isVerified': false,
+        'verificationStatus': 'pending',
+      });
+      await db.collection('users').doc(uid).collection('private').doc('data').set({
+        'email': 'lounge@delta.com',
+        'ein': '12-3456789',
+        'licenseNumber': 'LIC-998877',
+      });
+
+      final mainSnap = await db.collection('users').doc(uid).get();
+      expect(mainSnap.data()!['verificationStatus'], 'pending');
+      expect(mainSnap.data()!.containsKey('ein'), false);
+
+      final privateSnap = await db
+          .collection('users').doc(uid).collection('private').doc('data').get();
+      expect(privateSnap.data()!['ein'], '12-3456789');
+      expect(privateSnap.data()!['licenseNumber'], 'LIC-998877');
+    });
+
+    test('user (non-business) signup doc has no verificationStatus field', () async {
+      const uid = 'user-uid-1';
+      await db.collection('users').doc(uid).set({
+        'uid': uid,
+        'name': 'Alex Crew',
+        'email': 'alex@delta.com',
+        'role': 'user',
+        'isBanned': false,
+        'isVerified': false,
+      });
+      final snap = await db.collection('users').doc(uid).get();
+      expect(snap.data()!.containsKey('verificationStatus'), false);
+    });
+
+    test('OAuth business account doc shape: verificationStatus pending '
+        '(mirrors email/password path)', () async {
+      const uid = 'oauth-biz-uid-1';
+      await db.collection('users').doc(uid).set({
+        'uid': uid,
+        'name': 'Sky Lounge (Google)',
+        'email': 'lounge@gmail.com',
+        'role': 'business',
+        'isBanned': false,
+        'isVerified': false,
+        'verificationStatus': 'pending',
+      });
+      final snap = await db.collection('users').doc(uid).get();
+      expect(snap.data()!['verificationStatus'], 'pending');
     });
   });
 

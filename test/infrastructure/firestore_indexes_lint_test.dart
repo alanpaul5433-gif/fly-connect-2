@@ -153,18 +153,28 @@ void main() {
 // only the leaf collection ("trips") matters for composite indexing.
 final List<_QuerySpec> _queries = [
   // ── posts ─────────────────────────────────────────────────────
-  _QuerySpec(
+  const _QuerySpec(
     label: 'home feed (PostProvider._resubscribeFeed)',
     collection: 'posts',
+    equalities: ['audience'],
     orderBy: 'createdAt',
   ),
-  _QuerySpec(
+  const _QuerySpec(
     label: 'user posts (PostRepo.watchUserPosts, GDPR export)',
     collection: 'posts',
     equalities: ['authorId'],
     orderBy: 'createdAt',
   ),
-  _QuerySpec(
+  const _QuerySpec(
+    // H7. Viewing SOMEONE ELSE's profile must also pin audience, or the B2
+    // posts rule rejects the whole query. Viewing your own reuses the
+    // authorId-only spec above, since owning the docs is proof enough.
+    label: "another user's profile grid (PostProvider.watchUserPosts)",
+    collection: 'posts',
+    equalities: ['authorId', 'audience'],
+    orderBy: 'createdAt',
+  ),
+  const _QuerySpec(
     label: 'reported posts (admin content)',
     collection: 'posts',
     equalities: ['isReported'],
@@ -172,12 +182,12 @@ final List<_QuerySpec> _queries = [
   ),
 
   // ── events ────────────────────────────────────────────────────
-  _QuerySpec(
+  const _QuerySpec(
     label: 'events feed (EventProvider._subscribeEvents)',
     collection: 'events',
     orderBy: 'date',
   ),
-  _QuerySpec(
+  const _QuerySpec(
     label: 'approved events (EventRepo.watchEvents)',
     collection: 'events',
     equalities: ['isApproved'],
@@ -185,13 +195,13 @@ final List<_QuerySpec> _queries = [
   ),
 
   // ── chats ─────────────────────────────────────────────────────
-  _QuerySpec(
+  const _QuerySpec(
     label: 'my chats (ChatProvider._subscribeChats / ChatRepo)',
     collection: 'chats',
     arrayContains: 'participants',
     orderBy: 'lastMessageAt',
   ),
-  _QuerySpec(
+  const _QuerySpec(
     label: 'find DM with user (ChatProvider.openOrCreateDm)',
     collection: 'chats',
     equalities: ['type'],
@@ -199,14 +209,14 @@ final List<_QuerySpec> _queries = [
   ),
 
   // ── messages (subcollection — leaf collection name only) ──────
-  _QuerySpec(
+  const _QuerySpec(
     label: 'conversation messages (ChatProvider.watchMessages)',
     collection: 'messages',
     orderBy: 'createdAt',
   ),
 
   // ── notifications ─────────────────────────────────────────────
-  _QuerySpec(
+  const _QuerySpec(
     label: 'my notifications (NotificationProvider._subscribeNotifications)',
     collection: 'notifications',
     equalities: ['userId'],
@@ -214,12 +224,12 @@ final List<_QuerySpec> _queries = [
   ),
 
   // ── trips (subcollection — only the leaf "trips" indexes) ─────
-  _QuerySpec(
+  const _QuerySpec(
     label: 'user trips (TripRepo.watchTrips)',
     collection: 'trips',
     orderBy: 'startDate',
   ),
-  _QuerySpec(
+  const _QuerySpec(
     // top-level "trips" with userId filter (legacy/admin pathways)
     label: 'top-level trips by user',
     collection: 'trips',
@@ -228,12 +238,12 @@ final List<_QuerySpec> _queries = [
   ),
 
   // ── users ─────────────────────────────────────────────────────
-  _QuerySpec(
+  const _QuerySpec(
     label: 'crew-only directory (nearby_users_screen / repos)',
     collection: 'users',
     equalities: ['role'],
   ),
-  _QuerySpec(
+  const _QuerySpec(
     label: 'name prefix search (SearchProvider/UserRepo)',
     collection: 'users',
     ranges: ['name'],
@@ -241,62 +251,83 @@ final List<_QuerySpec> _queries = [
   ),
 
   // ── matches ───────────────────────────────────────────────────
-  _QuerySpec(
+  const _QuerySpec(
     label: 'my matches (MatchRepo.watchMatches)',
     collection: 'matches',
     equalities: ['userA', 'status'],
   ),
-  _QuerySpec(
+  const _QuerySpec(
     label: 'pending reciprocal like (MatchRepo.likeUser)',
     collection: 'matches',
     equalities: ['userA', 'userB', 'status'],
   ),
 
   // ── groups ────────────────────────────────────────────────────
-  _QuerySpec(
+  const _QuerySpec(
     label: 'popular groups (GroupRepo)',
     collection: 'groups',
     orderBy: 'memberCount',
   ),
-  _QuerySpec(
+  const _QuerySpec(
     label: 'my groups (GroupRepo)',
     collection: 'groups',
     arrayContains: 'members',
   ),
 
   // ── admin: GDPR ───────────────────────────────────────────────
-  _QuerySpec(
+  const _QuerySpec(
     label: 'GDPR queue (admin_gdpr_page)',
     collection: 'gdpr_requests',
     orderBy: 'createdAt',
   ),
 
   // ── admin: audit_log ──────────────────────────────────────────
-  _QuerySpec(
+  const _QuerySpec(
     label: 'audit log (admin_audit_page)',
     collection: 'audit_log',
     orderBy: 'timestamp',
   ),
 
   // ── admin: reports / safeChecks ───────────────────────────────
-  _QuerySpec(
+  const _QuerySpec(
     label: 'reports queue (admin_reports_page)',
     collection: 'reports',
     orderBy: 'createdAt',
   ),
-  _QuerySpec(
-    label: 'safeCheck stream (admin + SafeCheckProvider)',
+  const _QuerySpec(
+    label: 'safeCheck stream (admin, unconstrained)',
     collection: 'safeChecks',
     orderBy: 'createdAt',
   ),
-  _QuerySpec(
+  // H18: SafeCheckProvider now runs one constrained subscription per
+  // visibility branch, because the rules only admit a provably-scoped query.
+  const _QuerySpec(
+    label: 'safeChecks visible to everyone (SafeCheckProvider "all"/"verified")',
+    collection: 'safeChecks',
+    equalities: ['visibility'],
+    orderBy: 'createdAt',
+  ),
+  const _QuerySpec(
+    label: 'own safeCheck history (SafeCheckProvider "mine")',
+    collection: 'safeChecks',
+    equalities: ['userId'],
+    orderBy: 'createdAt',
+  ),
+  const _QuerySpec(
+    label: 'friends-only safeChecks (SafeCheckProvider "friends")',
+    collection: 'safeChecks',
+    equalities: ['visibility'],
+    arrayContains: 'visibleTo',
+    orderBy: 'createdAt',
+  ),
+  const _QuerySpec(
     label: 'need-help safeChecks (admin_dashboard)',
     collection: 'safeChecks',
     equalities: ['status'],
   ),
 
   // ── promotions ────────────────────────────────────────────────
-  _QuerySpec(
+  const _QuerySpec(
     label: 'promotions list (admin_promotions_page)',
     collection: 'promotions',
     orderBy: 'createdAt',

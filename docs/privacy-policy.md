@@ -1,9 +1,9 @@
 # Privacy Policy
 
-**Effective date:** _[INSERT DATE WHEN PUBLISHED]_
-**Last updated:** _[INSERT DATE]_
+**Effective date:** 2026-06-19
+**Last updated:** 2026-06-19
 
-This Privacy Policy describes how **FlyConnect** ("we", "us", "our", operated by AppCurb Technologies) collects, uses, and shares personal information when you use the FlyConnect mobile application and related services ("the Service").
+This Privacy Policy describes how **FlyConnect** ("we", "us", "our", operated by Urban Sync Innovations) collects, uses, and shares personal information when you use the FlyConnect mobile application and related services ("the Service").
 
 By creating an account or using the Service, you agree to the collection and use of information in accordance with this Privacy Policy.
 
@@ -22,7 +22,7 @@ By creating an account or using the Service, you agree to the collection and use
 
 - **Device and diagnostic information:** device model, operating system version, crash reports (via Firebase Crashlytics), app version, unique device identifiers.
 - **Usage data:** features accessed, screens viewed, approximate session duration (via Firebase Analytics).
-- **Approximate location:** only if you grant location permission, used to show nearby crew and attach location to SafeCheck check-ins. You can revoke this at any time in your device settings.
+- **Precise location:** only if you grant location permission, used to show nearby crew on the map and to attach your location to SafeCheck check-ins when you choose to share it. You can limit this to an approximate area via Settings → Privacy → "Approximate Location Only", and you can revoke location access entirely at any time in your device settings.
 - **Push notification token:** issued by Firebase Cloud Messaging to deliver notifications.
 
 ### 1.3 Information from Third-Party Sign-In Providers
@@ -79,8 +79,8 @@ You have the right to:
 - **Delete your account** — via Settings → Delete Account (permanent, see Section 4)
 - **Opt out of push notifications** — via Settings → Notifications
 - **Revoke location permission** — via your device settings
-- **Request a copy of your data** — email privacy@flyconnect.app
-- **Object to or restrict processing** — email privacy@flyconnect.app
+- **Request a copy of your data** — email privacy@flyconnect.co
+- **Object to or restrict processing** — email privacy@flyconnect.co
 
 Residents of the European Economic Area (EEA), United Kingdom, and Switzerland have additional rights under the GDPR. California residents have additional rights under the CCPA.
 
@@ -88,7 +88,7 @@ Residents of the European Economic Area (EEA), United Kingdom, and Switzerland h
 
 ## 6. Children's Privacy
 
-FlyConnect is not intended for users under 16 years of age. We do not knowingly collect personal information from children under 16. If we become aware that a child under 16 has provided us with personal information, we will delete it immediately. Contact privacy@flyconnect.app if you believe we have collected information from a child under 16.
+FlyConnect is not intended for users under 16 years of age. We do not knowingly collect personal information from children under 16. If we become aware that a child under 16 has provided us with personal information, we will delete it immediately. Contact privacy@flyconnect.co if you believe we have collected information from a child under 16.
 
 ---
 
@@ -122,10 +122,10 @@ We may update this Privacy Policy from time to time. We will notify you of mater
 
 If you have any questions, concerns, or requests regarding this Privacy Policy or your personal information:
 
-- **Email:** privacy@flyconnect.app
-- **Postal:** AppCurb Technologies, _[INSERT REGISTERED BUSINESS ADDRESS]_
-- **Data Protection Officer:** dpo@flyconnect.app _(if applicable under GDPR)_
+- **Email:** privacy@flyconnect.co
+- **Postal:** Urban Sync Innovations, _[INSERT REGISTERED BUSINESS ADDRESS]_
+- **Data Protection Officer:** dpo@flyconnect.co _(if applicable under GDPR)_
 
 ---
 
-_This Privacy Policy was last updated on [INSERT DATE]._
+_This Privacy Policy was last updated on 2026-06-19._

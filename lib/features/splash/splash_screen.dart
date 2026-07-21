@@ -27,7 +27,10 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       CurvedAnimation(parent: _controller, curve: const Interval(0.0, 0.5)));
     _controller.forward();
 
-    Future.delayed(const Duration(seconds: 2), _routeNext);
+    // Route once the 900ms logo animation has fully played (plus a ~100ms
+    // beat). Was a flat 2s — trimmed to cut ~1s of dead splash time off
+    // perceived cold start without clipping the animation (L-7).
+    Future.delayed(const Duration(milliseconds: 1000), _routeNext);
   }
 
   Future<void> _routeNext() async {
@@ -35,7 +38,13 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     try {
       final auth = context.read<AuthProvider>();
       if (auth.isLoggedIn) {
-        // Already authenticated — route to correct shell based on role
+        // Already authenticated — wait for the role fetch to actually finish
+        // before deciding, so a slow Firestore read can't leave us reading
+        // the 'user' default and stranding a business/admin account in the
+        // wrong shell. Bounded so an offline/unreachable Firestore can't
+        // hang splash forever.
+        await auth.authReady.timeout(const Duration(seconds: 3), onTimeout: () {});
+        if (!mounted) return;
         final role = auth.userRole;
         if (!mounted) return;
         switch (role) {
@@ -50,8 +59,10 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         }
         return;
       }
-    } catch (_) {
-      // AuthProvider type mismatch in mock mode — fall through to login
+    } catch (e) {
+      // AuthProvider type mismatch in mock mode — fall through to login.
+      // Log so a real (non-mock) failure here isn't an invisible logout.
+      debugPrint('[Splash] auth/role resolution failed, routing to login: $e');
     }
     // Not logged in (or mock mode) — check onboarding then go to login
     final prefs = await SharedPreferences.getInstance();
@@ -67,23 +78,22 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(gradient: AppColors.splashGradient),
+        color: Colors.black, // #000000 — matches the app icon background seamlessly
         child: Center(
           child: FadeTransition(
             opacity: _fadeAnim,
             child: ScaleTransition(
               scale: _scaleAnim,
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Container(width: 100, height: 100,
-                  decoration: BoxDecoration(color: AppColors.dark, borderRadius: BorderRadius.circular(24)),
-                  child: const Center(child: Text('✈️', style: TextStyle(fontSize: 48)))),
-                const SizedBox(height: 20),
-                const Text('FlyConnect', style: TextStyle(color: Colors.white,
-                  fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                const SizedBox(height: 8),
-                if (kDebugMode)
-                  Text('DEBUG MODE', style: TextStyle(color: Colors.white.withValues(alpha: 0.5),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: Image.asset('assets/images/app_icon.png', width: 140, height: 140),
+                ),
+                if (kDebugMode) ...[
+                  const SizedBox(height: 16),
+                  Text('DEBUG MODE', style: TextStyle(color: AppColors.textSecondary.withValues(alpha: 0.8),
                     fontSize: 11, letterSpacing: 2)),
+                ],
               ]),
             ),
           ),

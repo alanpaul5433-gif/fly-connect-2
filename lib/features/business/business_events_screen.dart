@@ -6,6 +6,8 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/models/models.dart';
 import '../../shared/providers/event_provider.dart';
+import '../../shared/providers/auth_provider.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class BusinessEventsScreen extends StatelessWidget {
   const BusinessEventsScreen({super.key});
@@ -39,8 +41,10 @@ class BusinessEventsScreen extends StatelessWidget {
         body: Consumer<EventProvider>(
           builder: (context, provider, _) {
             final now = DateTime.now();
-            final upcoming = provider.events.where((e) => e.date.isAfter(now)).toList();
-            final past = provider.events.where((e) => e.date.isBefore(now)).toList();
+            final uid = context.watch<AuthProvider>().currentUser?.uid ?? '';
+            final mine = provider.myEvents(uid);
+            final upcoming = mine.where((e) => e.date.isAfter(now)).toList();
+            final past = mine.where((e) => e.date.isBefore(now)).toList();
             return TabBarView(children: [
               _EventList(events: upcoming, isPast: false),
               _EventList(events: past, isPast: true),
@@ -102,8 +106,8 @@ class _EventCard extends StatelessWidget {
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
             child: Stack(children: [
-              Image.network(event.imageUrl!, height: 120, width: double.infinity, fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(height: 120, color: AppColors.backgroundGrey,
+              CachedFeedImage(url: event.imageUrl!, height: 120, width: double.infinity, fit: BoxFit.cover,
+                errorWidget: Container(height: 120, color: AppColors.backgroundGrey,
                   child: const Center(child: Icon(Icons.event, size: 48, color: AppColors.primary)))),
               Positioned(top: 8, right: 8, child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

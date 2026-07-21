@@ -8,6 +8,7 @@ import '../../core/constants/app_text_styles.dart';
 import '../../shared/models/models.dart';
 import '../../shared/providers/providers.dart';
 import '../../shared/widgets/shared_widgets.dart';
+import '../../shared/widgets/cached_image.dart';
 
 class PromotionsScreen extends StatelessWidget {
   const PromotionsScreen({super.key});
@@ -22,7 +23,7 @@ class PromotionsScreen extends StatelessWidget {
           backgroundColor: Colors.white,
           elevation: 0,
           automaticallyImplyLeading: false,
-          title: const Text('Promotions', style: AppTextStyles.labelLarge),
+          title: const Text('Crew Deals', style: AppTextStyles.labelLarge),
           centerTitle: true,
           actions: [
             IconButton(
@@ -39,12 +40,16 @@ class PromotionsScreen extends StatelessWidget {
           ),
         ),
         body: Consumer<PromotionProvider>(
-          builder: (context, provider, _) => TabBarView(
-            children: [
-              _PromotionList(promotions: provider.activePromotions),
-              _PromotionList(promotions: provider.expiredPromotions),
-            ],
-          ),
+          builder: (context, provider, _) {
+            final uid = context.watch<AuthProvider>().currentUser?.uid ?? '';
+            final mine = provider.myPromotions(uid);
+            return TabBarView(
+              children: [
+                _PromotionList(promotions: mine.where((p) => p.isActive && p.isApproved).toList()),
+                _PromotionList(promotions: mine.where((p) => !p.isActive).toList()),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -60,8 +65,8 @@ class _PromotionList extends StatelessWidget {
     if (promotions.isEmpty) {
       return const EmptyState(
         icon: Icons.local_offer_outlined,
-        title: 'No promotions yet',
-        subtitle: 'Create your first promotion to reach more customers.',
+        title: 'No deals yet',
+        subtitle: 'Create your first deal to reach more customers.',
       );
     }
     return ListView.builder(
@@ -91,8 +96,8 @@ class _PromotionCard extends StatelessWidget {
         if (promo.imageUrl != null)
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-            child: Image.network(promo.imageUrl!, height: 140, width: double.infinity, fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(height: 140, color: AppColors.backgroundGrey)),
+            child: CachedFeedImage(url: promo.imageUrl!, height: 140, width: double.infinity, fit: BoxFit.cover,
+              errorWidget: Container(height: 140, color: AppColors.backgroundGrey)),
           ),
         Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -152,10 +157,10 @@ class _PromotionCard extends StatelessWidget {
             const SizedBox(width: 10),
             ElevatedButton(
               onPressed: () {
-                final link = 'https://flyconnect.app/promotions/${promo.id}';
+                final link = 'https://flyconnect.co/promotions/${promo.id}';
                 Clipboard.setData(ClipboardData(text: link));
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Promotion link copied to clipboard'),
+                  content: Text('Deal link copied to clipboard'),
                   duration: Duration(seconds: 2)));
               },
               style: ElevatedButton.styleFrom(

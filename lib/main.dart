@@ -6,12 +6,12 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:provider/provider.dart';
-import 'core/config/firebase_config.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/version_check_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/utils/app_router.dart';
 import 'features/common/force_update_screen.dart';
+import 'firebase_options.dart';
 import 'shared/providers/real_providers.dart';
 import 'shared/widgets/error_boundary.dart';
 
@@ -22,15 +22,28 @@ Future<void> main() async {
     // Install the friendly error fallback as early as possible — before
     // Firebase init, in case Firebase itself throws during boot.
     ErrorBoundary.install();
-    await Firebase.initializeApp(
-      options: FirebaseConfig.currentPlatformOptions,
-    );
+    // Android/iOS auto-initialize the [DEFAULT] app natively from
+    // google-services.json / GoogleService-Info.plist (the Gradle / CocoaPods
+    // plugins run before any Dart). Calling initializeApp again then throws
+    // `duplicate-app`. Swallow exactly that case — the native default app is
+    // already live and carries the correct google_app_id, so we inherit it —
+    // and rethrow anything else.
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    } on FirebaseException catch (e) {
+      if (e.code != 'duplicate-app') rethrow;
+    }
 
     // Crashlytics wiring (Crashlytics is not supported on web).
     if (!kIsWeb) {
+      // Register the error handlers synchronously so any early crash is
+      // captured. The collection-enabled toggle is a platform round-trip that
+      // nothing below depends on — fire it and don't block first frame (L-7).
       // Disable in debug to avoid polluting the dashboard with dev crashes.
-      await FirebaseCrashlytics.instance
-          .setCrashlyticsCollectionEnabled(!kDebugMode);
+      unawaited(FirebaseCrashlytics.instance
+          .setCrashlyticsCollectionEnabled(!kDebugMode));
 
       // Flutter framework errors -> Crashlytics
       FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
@@ -42,10 +55,12 @@ Future<void> main() async {
       };
     }
 
-    // Analytics: log app_open for install/activation funnel
-    try {
-      await FirebaseAnalytics.instance.logAppOpen();
-    } catch (_) {/* analytics is best-effort */}
+    // Analytics: log app_open for the install/activation funnel. Fire-and-
+    // forget — this is a network call and awaiting it delayed first frame
+    // (L-7 cold-start fix). Best-effort, so swallow any failure.
+    unawaited(
+      FirebaseAnalytics.instance.logAppOpen().then((_) {}, onError: (_) {}),
+    );
 
     // FCM: permission prompt + token storage + foreground listener
     unawaited(NotificationService.instance.init());

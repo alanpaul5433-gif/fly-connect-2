@@ -10,7 +10,9 @@ import '../../shared/widgets/inline_error_banner.dart';
 import '../../shared/providers/event_provider.dart';
 import '../../shared/providers/auth_provider.dart';
 import '../../shared/models/models.dart';
+import 'events_filter.dart';
 import '../home/main_shell.dart' show AppDrawer;
+import '../../shared/widgets/cached_image.dart';
 
 class EventsScreen extends StatefulWidget {
   const EventsScreen({super.key});
@@ -19,6 +21,7 @@ class EventsScreen extends StatefulWidget {
 
 class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderStateMixin {
   bool _nearbyEnabled = false;
+  EventsTab _tab = EventsTab.all;
   late TabController _tabs;
 
   @override
@@ -32,6 +35,9 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
 
   @override
   Widget build(BuildContext context) {
+    // Event/Group creation is restricted to business (and admin) accounts.
+    final role = context.watch<AuthProvider>().userRole;
+    final canCreate = role == 'business' || role == 'admin';
     return Scaffold(
       backgroundColor: AppColors.background,
       drawer: const AppDrawer(),
@@ -39,16 +45,27 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
         showMenuIcon: true,
         showBack: Navigator.canPop(context),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add, color: AppColors.textPrimary),
-            onPressed: () => context.push('/create-event')),
+          if (canCreate)
+            IconButton(
+              icon: const Icon(Icons.add, color: AppColors.textPrimary),
+              onPressed: () => context.push('/create-event')),
           const TopBarActions(),
         ],
       ),
       body: Consumer<EventProvider>(
         builder: (context, provider, _) {
-          final events = provider.events;
-          final featured = events.where((e) => e.isFeatured).toList();
+          // H4: all three tabs used to render this same derivation.
+          final tabEvents = eventsForTab(provider.visibleEvents, _tab);
+          // The carousel is a highlight strip above the list. On the Featured
+          // tab it would just duplicate the list, so there it stands down and
+          // the featured events become the list itself.
+          final onFeaturedTab = _tab == EventsTab.featured;
+          final featured = onFeaturedTab
+              ? const <EventModel>[]
+              : tabEvents.where((e) => e.isFeatured).toList();
+          final upcomingList = onFeaturedTab
+              ? tabEvents
+              : tabEvents.where((e) => !e.isFeatured).toList();
           final err = provider.eventsError;
 
           return RefreshIndicator(
@@ -92,7 +109,7 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
                   indicatorColor: AppColors.primary,
                   indicatorWeight: 3,
                   tabs: const [Tab(text: 'All'), Tab(text: 'Upcoming'), Tab(text: 'Featured')],
-                  onTap: (_) {},
+                  onTap: (i) => setState(() => _tab = EventsTab.values[i]),
                 )),
               const SizedBox(height: 16),
 
@@ -109,8 +126,9 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
                 const SizedBox(height: 20),
               ],
 
-              // Create group CTA
-              Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
+              // Create group CTA — business/admin only
+              if (canCreate)
+                Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -131,27 +149,46 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
                   ]))),
               const SizedBox(height: 20),
 
-              // Upcoming events
-              const Padding(padding: EdgeInsets.symmetric(horizontal: 16),
-                child: SectionHeader(title: 'Upcoming Events', actionLabel: 'See All')),
+              // Section title tracks the tab, so the heading can't contradict
+              // the list under it (the Featured tab said "Upcoming Events").
+              Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: SectionHeader(
+                  title: switch (_tab) {
+                    EventsTab.all => 'All Events',
+                    EventsTab.upcoming => 'Upcoming Events',
+                    EventsTab.featured => 'Featured Events',
+                  },
+                  // H5: 'See All' was passed with no onAction — a dead
+                  // control. There is no separate all-events screen, so it
+                  // now does the only honest thing it can: switch to the All
+                  // tab. On All itself there is nothing more to see, so the
+                  // label is dropped rather than left inert.
+                  actionLabel: _tab == EventsTab.all ? null : 'See All',
+                  onAction: _tab == EventsTab.all
+                      ? null
+                      : () => setState(() {
+                            _tab = EventsTab.all;
+                            _tabs.animateTo(EventsTab.all.index);
+                          }),
+                )),
               const SizedBox(height: 12),
 
-              if (events.isEmpty)
+              if (upcomingList.isEmpty)
                 EmptyState(
                   icon: Icons.event_outlined,
                   title: 'No events yet',
                   subtitle:
                       'Check back soon, or start one yourself for your crew.',
-                  actionLabel: 'Create Event',
-                  onAction: () => context.push('/create-event'),
+                  actionLabel: canCreate ? 'Create Event' : null,
+                  onAction: canCreate ? () => context.push('/create-event') : null,
                 )
               else
                 ListView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: events.length,
-                  itemBuilder: (_, i) => _EventListTile(event: events[i])),
+                  itemCount: upcomingList.length,
+                  itemBuilder: (_, i) => _EventListTile(event: upcomingList[i])),
               const SizedBox(height: 24),
             ]),
           );
@@ -175,8 +212,8 @@ class _FeaturedCard extends StatelessWidget {
         ClipRRect(borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
           child: Stack(children: [
             event.imageUrl != null
-              ? Image.network(event.imageUrl!, height: 130, width: double.infinity, fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(height: 130, color: AppColors.backgroundGrey))
+              ? CachedFeedImage(url: event.imageUrl!, height: 130, width: double.infinity, fit: BoxFit.cover,
+                  errorWidget: Container(height: 130, color: AppColors.backgroundGrey))
               : Container(height: 130, color: AppColors.dark,
                   child: const Center(child: Icon(Icons.event, color: AppColors.primary, size: 40))),
             Container(height: 130, decoration: BoxDecoration(
@@ -213,8 +250,8 @@ class _EventListTile extends StatelessWidget {
       child: Row(children: [
         ClipRRect(borderRadius: BorderRadius.circular(10),
           child: event.imageUrl != null
-            ? Image.network(event.imageUrl!, width: 70, height: 70, fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(width: 70, height: 70, color: AppColors.backgroundGrey,
+            ? CachedFeedImage(url: event.imageUrl!, width: 70, height: 70, fit: BoxFit.cover,
+                errorWidget: Container(width: 70, height: 70, color: AppColors.backgroundGrey,
                   child: const Icon(Icons.event, color: AppColors.textSecondary)))
             : Container(width: 70, height: 70, color: AppColors.dark,
                 child: const Center(child: Icon(Icons.event, color: AppColors.primary)))),

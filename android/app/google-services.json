@@ -8,48 +8,28 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:361504801284:android:0ebf704e8b9876fbc0ab51",
+        "mobilesdk_app_id": "1:361504801284:android:7b9682e73d98c7fbc0ab51",
         "android_client_info": {
-          "package_name": "com.appcurb.flyconnect"
+          "package_name": "com.urbansyncinnovations.flyconnect"
         }
       },
       "oauth_client": [
         {
-          "client_id": "361504801284-kft6aqt6bgc9dil4r3u3nqsfss4m4h71.apps.googleusercontent.com",
-          "client_type": 3
-        }
-      ],
-      "api_key": [
+          "client_id": "361504801284-cf3lf5uuem6di00tf5300rbsse3ssfo2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.urbansyncinnovations.flyconnect",
+            "certificate_hash": "84baa804c01e16d76e5480f218b638575f978cdd"
+          }
+        },
         {
-          "current_key": "AIzaSyAViMZd_Vv4rrFjO5r_Jbd3wogHAOlOUzo"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "361504801284-kft6aqt6bgc9dil4r3u3nqsfss4m4h71.apps.googleusercontent.com",
-              "client_type": 3
-            },
-            {
-              "client_id": "361504801284-6g6j57f44uus511lre2noo6t4ubspc79.apps.googleusercontent.com",
-              "client_type": 2,
-              "ios_info": {
-                "bundle_id": "com.flyconnect.app"
-              }
-            }
-          ]
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:361504801284:android:abdba96bb13613c4c0ab51",
-        "android_client_info": {
-          "package_name": "com.flyconnect.app"
-        }
-      },
-      "oauth_client": [
+          "client_id": "361504801284-lgulm1gej4p4ek72i5nko5g7bqf3oktf.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.urbansyncinnovations.flyconnect",
+            "certificate_hash": "5181cd10a74200efbdbee37a692130b9a2f9b388"
+          }
+        },
         {
           "client_id": "361504801284-kft6aqt6bgc9dil4r3u3nqsfss4m4h71.apps.googleusercontent.com",
           "client_type": 3

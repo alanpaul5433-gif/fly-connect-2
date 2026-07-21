@@ -41,6 +41,19 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         backgroundColor: Colors.red));
       return;
     }
+    if (auth.userRole != 'business' && auth.userRole != 'admin') {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Only business accounts can create groups.'),
+        backgroundColor: Colors.red));
+      return;
+    }
+    if (auth.userRole == 'business' && !user.isVerified) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Your business account is pending verification. '
+            'You\'ll be able to create groups once an admin approves it.'),
+        backgroundColor: Colors.red));
+      return;
+    }
     setState(() => _loading = true);
     final tagsRaw = _tagsCtrl.text.trim();
     final tags = tagsRaw.isEmpty
@@ -57,14 +70,19 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       isPinned: false,
       createdAt: DateTime.now(),
     );
-    // ignore: use_build_context_synchronously
-    context.read<GroupProvider>().createGroup(newGroup);
-    // ignore: use_build_context_synchronously
-    if (mounted) {
+    try {
+      await context.read<GroupProvider>().createGroup(newGroup);
+      if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Group created successfully!'), duration: Duration(seconds: 2)));
       GoRouter.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Failed to create group: $e'),
+        backgroundColor: Colors.red));
     }
   }
 
@@ -84,22 +102,6 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Cover image placeholder
-          Container(
-            height: 160, width: double.infinity,
-            decoration: BoxDecoration(
-              color: AppColors.backgroundGrey,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey.shade200),
-            ),
-            child: const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.add_photo_alternate_outlined, size: 40, color: AppColors.textSecondary),
-              SizedBox(height: 6),
-              Text('Add Cover Photo', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-            ])),
-          ),
-          const SizedBox(height: 20),
-
           const Text('Group Name *', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
           const SizedBox(height: 6),
           _buildField(_titleCtrl, 'e.g. Delta Pilots Network'),

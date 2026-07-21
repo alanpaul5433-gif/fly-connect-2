@@ -6,10 +6,15 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../../core/constants/app_colors.dart';
 import '../../shared/models/models.dart';
 import '../../shared/providers/group_provider.dart';
+import '../../shared/providers/auth_provider.dart';
 import '../../shared/providers/chat_provider.dart';
 import '../../shared/providers/post_provider.dart';
+import '../../shared/providers/user_provider.dart';
 import '../../shared/widgets/confirm_dialog.dart';
 import '../../shared/widgets/shared_widgets.dart';
+import '../../shared/widgets/cached_image.dart';
+import '../../shared/widgets/organizer_row.dart';
+import '../../shared/utils/open_chat.dart';
 
 class GroupDetailsScreen extends StatefulWidget {
   final String groupId;
@@ -21,12 +26,13 @@ class GroupDetailsScreen extends StatefulWidget {
 class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTickerProviderStateMixin {
   late TabController _tabs;
   GroupModel? _group;
+  UserModel? _organizer;
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 3, vsync: this);
+    _tabs = TabController(length: 2, vsync: this);
     _load();
   }
 
@@ -34,8 +40,11 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
   void dispose() { _tabs.dispose(); super.dispose(); }
 
   Future<void> _load() async {
-    final g = await context.read<GroupProvider>().getGroup(widget.groupId);
-    if (mounted) setState(() { _group = g; _loading = false; });
+    final groupProvider = context.read<GroupProvider>();
+    final userProvider = context.read<UserProvider>();
+    final g = await groupProvider.getGroup(widget.groupId);
+    final organizer = g == null ? null : await userProvider.fetchUser(g.createdBy);
+    if (mounted) setState(() { _group = g; _organizer = organizer; _loading = false; });
   }
 
   void _openGroupChat() {
@@ -104,7 +113,7 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
             title: const Text('Share group'),
             onTap: () {
               Navigator.pop(context);
-              final link = 'https://flyconnect.app/groups/${g.id}';
+              final link = 'https://flyconnect.co/groups/${g.id}';
               Clipboard.setData(ClipboardData(text: link));
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                 content: Text('Group link copied to clipboard'),
@@ -117,7 +126,7 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
             title: const Text('Copy link'),
             onTap: () {
               Navigator.pop(context);
-              final link = 'https://flyconnect.app/groups/${g.id}';
+              final link = 'https://flyconnect.co/groups/${g.id}';
               Clipboard.setData(ClipboardData(text: link));
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                 content: Text('Group link copied to clipboard'),
@@ -125,19 +134,7 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
               ));
             },
           ),
-          ListTile(
-            leading:
-                const Icon(Icons.notifications_off_outlined, color: Colors.grey),
-            title: const Text('Mute group'),
-            subtitle: const Text('Coming soon', style: TextStyle(fontSize: 11)),
-            onTap: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Muting is not yet available in this build.'),
-                duration: Duration(seconds: 2),
-              ));
-            },
-          ),
+          // Mute group hidden for v1.0 — not yet implemented.
           ListTile(
             leading: const Icon(Icons.flag_outlined, color: Colors.red),
             title:
@@ -186,8 +183,8 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
             flexibleSpace: FlexibleSpaceBar(
               background: Stack(fit: StackFit.expand, children: [
                 g.imageUrl != null
-                  ? Image.network(g.imageUrl!, fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(color: AppColors.dark))
+                  ? CachedFeedImage(url: g.imageUrl!, fit: BoxFit.cover,
+                      errorWidget: Container(color: AppColors.dark))
                   : Container(color: AppColors.dark,
                       child: const Center(child: Icon(Icons.group, color: AppColors.primary, size: 72))),
                 Container(decoration: BoxDecoration(
@@ -269,6 +266,10 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
           // About + tags
           Padding(padding: const EdgeInsets.all(16), child: Column(
             crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (_organizer != null) ...[
+              OrganizerRow(organizer: _organizer!),
+              const SizedBox(height: 10),
+            ],
             Text(g.description, style: const TextStyle(color: Colors.black87, fontSize: 14, height: 1.5)),
             if (g.tags.isNotEmpty) ...[
               const SizedBox(height: 10),
@@ -285,12 +286,10 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> with SingleTick
             tabs: [
               Tab(text: 'Posts (${groupPosts.length})'),
               const Tab(text: 'Members'),
-              const Tab(text: 'Events'),
             ]),
           Expanded(child: TabBarView(controller: _tabs, children: [
             _PostsTab(posts: groupPosts),
-            _MembersTab(members: g.members),
-            _EventsTab(groupId: g.id),
+            _MembersTab(groupId: g.id, members: g.members, admins: g.admins),
           ])),
         ]),
       ),
@@ -358,8 +357,8 @@ class _PostCard extends StatelessWidget {
         if (post.mediaUrls.isNotEmpty)
           ClipRRect(
             borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
-            child: Image.network(post.mediaUrls.first, width: double.infinity, height: 180, fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => const SizedBox()),
+            child: CachedFeedImage(url: post.mediaUrls.first, width: double.infinity, height: 180, fit: BoxFit.cover,
+              errorWidget: const SizedBox()),
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
@@ -379,22 +378,54 @@ class _PostCard extends StatelessWidget {
 }
 
 class _MembersTab extends StatefulWidget {
+  final String groupId;
   final List<String> members;
-  const _MembersTab({required this.members});
+  final List<String> admins;
+  const _MembersTab({required this.groupId, required this.members, required this.admins});
   @override
   State<_MembersTab> createState() => _MembersTabState();
 }
 
 class _MembersTabState extends State<_MembersTab> {
   late List<String> _members;
+  /// uid -> profile, for the members we managed to resolve. H22: this tab
+  /// rendered `Member 1`, `Member 2` … with the raw uid as the subtitle, even
+  /// though GroupProvider.fetchMembers already existed and the business
+  /// screens used it. Members not in this map fall back to the uid, so a
+  /// failed or capped lookup degrades a row instead of emptying the list.
+  Map<String, UserModel> _profiles = const {};
 
   @override
   void initState() {
     super.initState();
     _members = List.from(widget.members);
+    _loadProfiles();
+  }
+
+  Future<void> _loadProfiles() async {
+    try {
+      final users = await context.read<GroupProvider>().fetchMembers(_members);
+      if (!mounted) return;
+      setState(() => _profiles = {for (final u in users) u.uid: u});
+    } catch (_) {
+      // Names are a nicety; the list still works without them.
+    }
+  }
+
+  /// Display name for a member row, or null when we couldn't resolve one.
+  String? _nameFor(String uid) {
+    final name = _profiles[uid]?.name.trim();
+    return (name == null || name.isEmpty) ? null : name;
+  }
+
+  bool get _isAdmin {
+    final uid = context.read<AuthProvider>().currentUser?.uid;
+    return uid != null && widget.admins.contains(uid);
   }
 
   void _removeMember(String uid) {
+    final groupProvider = context.read<GroupProvider>();
+    final messenger = ScaffoldMessenger.of(context);
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -403,11 +434,18 @@ class _MembersTabState extends State<_MembersTab> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           TextButton(
-            onPressed: () {
-              setState(() => _members.remove(uid));
+            onPressed: () async {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Member removed'), duration: Duration(seconds: 2)));
+              setState(() => _members.remove(uid));
+              try {
+                await groupProvider.removeMember(widget.groupId, uid);
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Member removed'), duration: Duration(seconds: 2)));
+              } catch (_) {
+                if (mounted) setState(() => _members.add(uid));
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Could not remove member. Try again.')));
+              }
             },
             child: const Text('Remove', style: TextStyle(color: Colors.red)),
           ),
@@ -441,40 +479,59 @@ class _MembersTabState extends State<_MembersTab> {
         itemCount: _members.length,
         itemBuilder: (_, i) {
           final uid = _members[i];
+          final profile = _profiles[uid];
+          final name = _nameFor(uid);
+          // Falls back to the uid rather than an invented "Member 3": a raw id
+          // at least identifies someone real.
+          final title = name ?? uid;
+          final avatarLetter = (name ?? uid).isNotEmpty
+              ? (name ?? uid)[0].toUpperCase()
+              : '?';
           return ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-            leading: CircleAvatar(backgroundColor: AppColors.dark,
-              child: Text(uid.isNotEmpty ? uid[0].toUpperCase() : '?',
+            leading: CachedAvatar(
+              url: profile?.photoUrl,
+              radius: 20,
+              backgroundColor: AppColors.dark,
+              fallback: Text(avatarLetter,
                 style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold))),
-            title: Text('Member ${i + 1}', style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text(uid, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+            title: Text(title,
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: profile?.airline != null && profile!.airline!.isNotEmpty
+              ? Text([profile.airline, profile.position]
+                    .where((s) => s != null && s.isNotEmpty).join(' · '),
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: AppColors.textSecondary))
+              : null,
             onTap: () => context.push('/users/$uid'),
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(
                 icon: const Icon(Icons.chat_bubble_outline, size: 18, color: AppColors.primary),
                 tooltip: 'Message member',
-                onPressed: () => context.push('/conversation/${uid}_dm?name=Member+${i + 1}'),
+                // H23: this pushed a FABRICATED chat id (`${uid}_dm`), so
+                // messages landed in a chat the recipient was not a
+                // participant of and never arrived. OpenChat goes through
+                // getOrCreateDm, and carries otherUid so block/report work.
+                onPressed: () => OpenChat.withUser(context,
+                  otherUid: uid,
+                  otherName: name ?? 'Member',
+                  otherPhotoUrl: profile?.photoUrl),
                 padding: EdgeInsets.zero, constraints: const BoxConstraints(),
               ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: Icon(Icons.remove_circle_outline, size: 18, color: Colors.red.shade300),
-                tooltip: 'Remove member',
-                onPressed: () => _removeMember(uid),
-                padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-              ),
+              if (_isAdmin) ...[
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: Icon(Icons.remove_circle_outline, size: 18, color: Colors.red.shade300),
+                  tooltip: 'Remove member',
+                  onPressed: () => _removeMember(uid),
+                  padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                ),
+              ],
             ]),
           );
         },
       )),
     ]);
   }
-}
-
-class _EventsTab extends StatelessWidget {
-  final String groupId;
-  const _EventsTab({required this.groupId});
-  @override
-  Widget build(BuildContext context) => const Center(
-    child: Text('Group events coming soon', style: TextStyle(color: Colors.grey)));
 }

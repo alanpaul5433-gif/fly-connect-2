@@ -107,10 +107,10 @@ class _AsyncBoundaryState<T> extends State<AsyncBoundary<T>> {
     });
   }
 
-  Widget _defaultLoading(BuildContext context) => Padding(
-        padding: const EdgeInsets.all(16),
+  Widget _defaultLoading(BuildContext context) => const Padding(
+        padding: EdgeInsets.all(16),
         child: Column(
-          children: const [
+          children: [
             Skeleton(width: double.infinity, height: 80, radius: 12),
             SizedBox(height: 12),
             Skeleton(width: double.infinity, height: 80, radius: 12),

@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -16,10 +15,12 @@ import '../../shared/providers/auth_provider.dart';
 import '../../shared/providers/user_provider.dart';
 import '../../shared/providers/promotion_provider.dart';
 import '../../shared/models/models.dart';
-import '../../shared/mock/story_state.dart';
 import 'post_details_screen.dart';
+import 'edit_post_screen.dart';
 import 'story_viewer_screen.dart';
 import 'main_shell.dart' show AppDrawer;
+import '../../shared/widgets/cached_image.dart';
+import '../../shared/widgets/feed_video.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -75,9 +76,21 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
+        // Stories row is pinned above the feed so "Your Story"/"Nearby" stay
+        // reachable in every state — empty, loading, error, and populated.
+        // (Previously it was item 0 of the feed list and vanished whenever the
+        // feed had no posts.)
+        _StoriesRow(),
         Expanded(
-          child: Consumer<PostProvider>(
-            builder: (context, provider, _) {
+          child: Selector<PostProvider, (List<PostModel>, String?, bool, bool)>(
+            // Rebuild only when the feed list identity or its status flags
+            // change — not on every unrelated PostProvider notify (e.g. a
+            // like/save toggle the card already handles optimistically).
+            selector: (_, p) => (p.feed, p.feedError, p.feedHasMore, p.feedLoadingMore),
+            builder: (context, _, __) {
+              // Status flags + methods are read non-reactively; the Selector
+              // above is what gates rebuilds.
+              final provider = context.read<PostProvider>();
               final posts = provider.feed;
               final feedError = provider.feedError;
               // First real data arrived → mark load complete so future
@@ -124,15 +137,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 onRefresh: () async => provider.listenFeed(),
                 child: ListView.separated(
                   padding: const EdgeInsets.only(bottom: 24),
-                  // posts + stories + promos + footer
-                  itemCount: posts.length + 3,
-                  separatorBuilder: (_, i) => i == 0 || i == 1
+                  // promos + posts + footer (stories are pinned outside the list)
+                  itemCount: posts.length + 2,
+                  separatorBuilder: (_, i) => i == 0
                       ? const Divider(color: AppColors.backgroundGrey, thickness: 6, height: 6)
                       : const SizedBox(height: 8),
                   itemBuilder: (context, i) {
-                    if (i == 0) return _StoriesRow();
-                    if (i == 1) return const _PromoStrip();
-                    if (i == posts.length + 2) {
+                    if (i == 0) return const _PromoStrip();
+                    if (i == posts.length + 1) {
                       // Footer: load-more or end-of-feed indicator
                       return Padding(
                         padding: const EdgeInsets.symmetric(
@@ -183,7 +195,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       );
                     }
-                    return _PostCard(post: posts[i - 2], index: i - 2);
+                    // H12: a stable key tied to post identity. Without it,
+                    // Flutter reuses _PostCardState positionally, so when the
+                    // feed prepends a new post the like/save state and counts —
+                    // seeded once in initState — stay attached to the wrong row.
+                    final post = posts[i - 1];
+                    return _PostCard(key: ValueKey(post.id), post: post, index: i - 1);
                   },
                 ),
               );
@@ -241,36 +258,60 @@ class _StoriesRow extends StatefulWidget {
 }
 
 class _StoriesRowState extends State<_StoriesRow> {
-  Uint8List? _myStoryBytes;
+  String? _myStoryUrl;
+  bool _uploading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMyStory();
+  }
+
+  Future<void> _loadMyStory() async {
+    final uid = context.read<AuthProvider>().currentUser?.uid;
+    if (uid == null) return;
+    final url = await context.read<UserProvider>().getMyStory(uid);
+    if (mounted) setState(() => _myStoryUrl = url);
+  }
 
   Future<void> _pickMyStory() async {
+    final userProvider = context.read<UserProvider>();
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery);
-    if (picked != null) {
-      final bytes = await picked.readAsBytes();
-      StoryState.instance.myStoryBytes = bytes;
-      setState(() => _myStoryBytes = bytes);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    setState(() => _uploading = true);
+    try {
+      final url = await userProvider.postStory(bytes);
+      if (mounted) setState(() { _myStoryUrl = url; _uploading = false; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _uploading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Could not post story: $e'),
+        backgroundColor: Colors.red));
     }
   }
 
   void _viewMyStory() {
-    if (_myStoryBytes == null) return;
+    if (_myStoryUrl == null) return;
     final currentUser = context.read<AuthProvider>().currentUser;
     if (currentUser == null) return;
     Navigator.push(context, MaterialPageRoute(
       builder: (_) => StoryViewerScreen(
         user: currentUser,
-        imageBytes: _myStoryBytes,
+        storyImageUrl: _myStoryUrl!,
         isOwn: true,
       ),
-    )).then((_) => setState(() => _myStoryBytes = StoryState.instance.myStoryBytes));
+    )).then((_) => _loadMyStory());
   }
 
   @override
   Widget build(BuildContext context) {
-    // Only "Your Story" is shown until a backend-backed stories feature ships.
-    // We intentionally no longer render fake stories for other users.
-    final hasStory = _myStoryBytes != null;
+    // Only "Your Story" is shown until a backend-backed multi-user stories
+    // feed ships. We intentionally no longer render fake stories for other
+    // users — this one is real (Firestore + Storage backed), just mine-only.
+    final hasStory = _myStoryUrl != null;
     return SizedBox(
       height: 104,
       child: ListView(
@@ -280,7 +321,7 @@ class _StoriesRowState extends State<_StoriesRow> {
           Padding(
             padding: const EdgeInsets.only(right: 14),
             child: GestureDetector(
-              onTap: hasStory ? _viewMyStory : _pickMyStory,
+              onTap: _uploading ? null : (hasStory ? _viewMyStory : _pickMyStory),
               child: Column(children: [
                 Stack(children: [
                   Container(
@@ -291,9 +332,11 @@ class _StoriesRowState extends State<_StoriesRow> {
                       color: AppColors.backgroundGrey,
                     ),
                     child: ClipOval(
-                      child: hasStory
-                          ? Image.memory(_myStoryBytes!, fit: BoxFit.cover)
-                          : const Icon(Icons.person, color: AppColors.textSecondary, size: 28),
+                      child: _uploading
+                          ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                          : hasStory
+                              ? CachedFeedImage(url: _myStoryUrl!, fit: BoxFit.cover)
+                              : const Icon(Icons.person, color: AppColors.textSecondary, size: 28),
                     ),
                   ),
                   if (!hasStory)
@@ -420,12 +463,12 @@ class _PromoMiniCard extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Stack(children: [
             promo.imageUrl != null
-                ? Image.network(
-                    promo.imageUrl!,
+                ? CachedFeedImage(
+                    url: promo.imageUrl!,
                     height: 90,
                     width: double.infinity,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _placeholder(),
+                    errorWidget: _placeholder(),
                   )
                 : _placeholder(),
             Positioned(
@@ -490,7 +533,7 @@ class _PromoMiniCard extends StatelessWidget {
 class _PostCard extends StatefulWidget {
   final PostModel post;
   final int index;
-  const _PostCard({required this.post, required this.index});
+  const _PostCard({super.key, required this.post, required this.index});
   @override
   State<_PostCard> createState() => _PostCardState();
 }
@@ -506,6 +549,23 @@ class _PostCardState extends State<_PostCard> {
     _likeCount = widget.post.likeCount;
     _checkLiked();
     _checkSaved();
+  }
+
+  @override
+  void didUpdateWidget(_PostCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Safety net for H12: the ValueKey should keep each State bound to one
+    // post, but if an element is ever reused for a DIFFERENT post, re-seed from
+    // the new post rather than showing the previous one's like/save state.
+    // Guarded on id change so it never fights the optimistic toggle for the
+    // same post (a snapshot re-emit must not stomp an in-flight like).
+    if (oldWidget.post.id != widget.post.id) {
+      _likeCount = widget.post.likeCount;
+      _liked = false;
+      _saved = false;
+      _checkLiked();
+      _checkSaved();
+    }
   }
 
   Future<void> _checkLiked() async {
@@ -545,7 +605,7 @@ class _PostCardState extends State<_PostCard> {
     setState(() { _liked = !_liked; _likeCount += _liked ? 1 : -1; });
     try {
       if (_liked) {
-        await provider.likePost(widget.post.id);
+        await provider.likePost(widget.post.id, postAuthorId: widget.post.authorId);
       } else {
         await provider.unlikePost(widget.post.id);
       }
@@ -569,7 +629,7 @@ class _PostCardState extends State<_PostCard> {
   }
 
   void _copyPostLink() {
-    final link = 'https://flyconnect.app/posts/${widget.post.id}';
+    final link = 'https://flyconnect.co/posts/${widget.post.id}';
     Clipboard.setData(ClipboardData(text: link));
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
       content: Text('Post link copied to clipboard'),
@@ -577,7 +637,17 @@ class _PostCardState extends State<_PostCard> {
     ));
   }
 
+  bool get _isOwnPost =>
+      context.read<AuthProvider>().currentUser?.uid == widget.post.authorId;
+
+  void _editPost() {
+    Navigator.pop(context); // close the options sheet
+    Navigator.push(context,
+      MaterialPageRoute(builder: (_) => EditPostScreen(post: widget.post)));
+  }
+
   void _showOptions() {
+    final isOwn = _isOwnPost;
     showModalBottomSheet(context: context, shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -589,26 +659,59 @@ class _PostCardState extends State<_PostCard> {
           leading: const Icon(Icons.link),
           title: const Text('Copy link'),
           onTap: () { Navigator.pop(context); _copyPostLink(); }),
-        ListTile(leading: const Icon(Icons.flag_outlined, color: Colors.red),
-          title: const Text('Report post', style: TextStyle(color: Colors.red)),
-          onTap: () async {
-            Navigator.pop(context);
-            final messenger = ScaffoldMessenger.of(context);
-            try {
-              await context.read<PostProvider>().reportPost(widget.post.id);
-              messenger.showSnackBar(const SnackBar(
-                content: Text('Post reported. Our team will review it.'),
-                backgroundColor: Colors.red,
-              ));
-            } catch (e) {
-              // Likely the rate-limit guard — surface to the user
-              messenger.showSnackBar(SnackBar(
-                content: Text(e.toString().replaceFirst('Exception: ', '')),
-                backgroundColor: Colors.orange,
-              ));
-            }
-          }),
+        if (isOwn) ...[
+          ListTile(leading: const Icon(Icons.edit_outlined),
+            title: const Text('Edit post'),
+            onTap: _editPost),
+          ListTile(leading: const Icon(Icons.delete_outline, color: Colors.red),
+            title: const Text('Delete post', style: TextStyle(color: Colors.red)),
+            onTap: () { Navigator.pop(context); _confirmDeletePost(); }),
+        ] else
+          ListTile(leading: const Icon(Icons.flag_outlined, color: Colors.red),
+            title: const Text('Report post', style: TextStyle(color: Colors.red)),
+            onTap: () async {
+              Navigator.pop(context);
+              final messenger = ScaffoldMessenger.of(context);
+              try {
+                await context.read<PostProvider>().reportPost(widget.post.id);
+                messenger.showSnackBar(const SnackBar(
+                  content: Text('Post reported. Our team will review it.'),
+                  backgroundColor: Colors.red,
+                ));
+              } catch (e) {
+                // Likely the rate-limit guard — surface to the user
+                messenger.showSnackBar(SnackBar(
+                  content: Text(e.toString().replaceFirst('Exception: ', '')),
+                  backgroundColor: Colors.orange,
+                ));
+              }
+            }),
       ])));
+  }
+
+  Future<void> _confirmDeletePost() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete post?'),
+        content: const Text("This can't be undone."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red))),
+        ],
+      ));
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<PostProvider>().deletePost(widget.post.id,
+        mediaUrls: widget.post.mediaUrls, thumbnailUrl: widget.post.thumbnailUrl);
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Could not delete post. Please try again.'),
+        backgroundColor: Colors.red,
+      ));
+    }
   }
 
   @override
@@ -620,16 +723,21 @@ class _PostCardState extends State<_PostCard> {
         child: Row(children: [
           GestureDetector(
             onTap: () => context.push('/users/${p.authorId}'),
-            child: CircleAvatar(radius: 20,
+            child: CachedAvatar(
+              url: p.authorPhotoUrl,
+              radius: 20,
               backgroundColor: AppColors.backgroundGrey,
-              backgroundImage: p.authorPhotoUrl != null ? NetworkImage(p.authorPhotoUrl!) : null,
-              child: p.authorPhotoUrl == null ? Text(p.authorName.isNotEmpty ? p.authorName[0] : '?', style: const TextStyle(color: AppColors.dark)) : null),
+              fallback: Text(p.authorName.isNotEmpty ? p.authorName[0] : '?', style: const TextStyle(color: AppColors.dark)),
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             GestureDetector(onTap: () => context.push('/users/${p.authorId}'),
               child: Text(p.authorName, style: AppTextStyles.labelMedium)),
-            Text(timeago.format(p.createdAt), style: AppTextStyles.caption),
+            Text(
+              '${timeago.format(p.createdAt)}${p.editedAt != null ? ' · edited' : ''}',
+              style: AppTextStyles.caption,
+            ),
           ])),
           IconButton(
             icon: const Icon(Icons.more_horiz, color: AppColors.textSecondary),
@@ -641,23 +749,38 @@ class _PostCardState extends State<_PostCard> {
       GestureDetector(
         onDoubleTap: _toggleLike,
         onTap: _openPost,
-        child: p.mediaUrls.isNotEmpty
-            ? ClipRRect(
-                borderRadius: BorderRadius.zero,
-                child: Image.network(
-                  p.mediaUrls.first,
+        child: (p.mediaType == 'video' && p.mediaUrls.isNotEmpty)
+            ? RepaintBoundary(
+                child: FeedVideo(
+                  videoUrl: p.mediaUrls.first,
+                  thumbnailUrl: p.thumbnailUrl,
+                  aspectRatio: p.aspectRatio,
                   height: 280,
                   width: double.infinity,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (_, child, progress) => progress == null ? child
-                      : Container(height: 280, color: AppColors.backgroundGrey,
-                          child: const Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2))),
-                  errorBuilder: (_, __, ___) => Container(height: 280, color: AppColors.backgroundGrey,
-                      child: const Icon(Icons.image_not_supported_outlined, color: AppColors.textSecondary)),
+                ),
+              )
+            : p.mediaUrls.isNotEmpty
+            ? ClipRRect(
+                borderRadius: BorderRadius.zero,
+                child: RepaintBoundary(
+                  child: CachedFeedImage(
+                    url: p.mediaUrls.first,
+                    height: 280,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    placeholder: Container(height: 280, color: AppColors.backgroundGrey,
+                        child: const Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2))),
+                    errorWidget: Container(height: 280, color: AppColors.backgroundGrey,
+                        child: const Icon(Icons.image_not_supported_outlined, color: AppColors.textSecondary)),
+                  ),
                 ))
             : Container(
                 height: 180,
-                color: Colors.primaries[widget.index % Colors.primaries.length].withValues(alpha: 0.15),
+                width: double.infinity, // fill the row; otherwise the tint
+                // shrink-wraps to the caption text and looks half-width.
+                // Text-only posts share one subtle, on-brand navy tint instead
+                // of a random Material colour per index (which read as broken).
+                color: AppColors.dark.withValues(alpha: 0.05),
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
