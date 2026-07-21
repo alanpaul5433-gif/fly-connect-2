@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flyconnect/shared/models/models.dart';
-import 'package:flyconnect/features/nearby/nearby_users_screen.dart'
+import 'package:flyconnect/features/nearby/location_share_gate.dart'
     show shouldShareLocation, resolveCoordinateToPersist;
 
 /// Tests for UserProvider.saveSettings — the persistence fix for H-1

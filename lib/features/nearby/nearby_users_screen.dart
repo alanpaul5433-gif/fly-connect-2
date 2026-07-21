@@ -13,6 +13,7 @@ import '../../shared/widgets/inline_error_banner.dart';
 import '../../shared/models/models.dart';
 import '../../shared/providers/real_providers.dart';
 import '../../shared/utils/block_list.dart';
+import 'location_share_gate.dart';
 import '../../shared/mock/mock_data.dart' show mockMyLocation;
 import '../../shared/utils/open_chat.dart';
 
@@ -64,18 +65,6 @@ class _NearbyUser {
     this.safeCheckVisible = true});
 }
 
-/// Whether the viewer's own position should be persisted so others can see
-/// a real distance to them — gated on the 'shareLocation' setting, which
-/// defaults on (matches settings_screen.dart's `_shareLocation = true`).
-bool shouldShareLocation(Map<String, dynamic> settings) =>
-    settings['shareLocation'] != false;
-
-/// The coordinate to actually persist/submit: fuzzed to ~1.1km precision
-/// when 'Approximate Location Only' is on (also defaults on).
-(double, double) resolveCoordinateToPersist(double lat, double lng, Map<String, dynamic> settings) =>
-    settings['approxLocationOnly'] != false
-        ? LocationService.fuzzCoordinate(lat, lng)
-        : (lat, lng);
 
 // ─── Screen ──────────────────────────────────────────────────
 class NearbyUsersScreen extends StatefulWidget {
@@ -107,7 +96,6 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
       setState(() { _loadingUsers = true; _loadError = null; _locationStatus = null; });
     }
     final auth = context.read<AuthProvider>();
-    final userProvider = context.read<UserProvider>();
     final myUid = auth.currentUser?.uid;
 
     if (auth.isMock) {
@@ -133,13 +121,14 @@ class _NearbyUsersScreenState extends State<NearbyUsersScreen> {
       _myLng = pos.longitude;
 
       if (myUid != null) {
-        final settings = auth.currentUser?.settings ?? {};
-        if (shouldShareLocation(settings)) {
-          try {
-            final (lat, lng) = resolveCoordinateToPersist(_myLat!, _myLng!, settings);
-            await userProvider.updateMyLocation(myUid, lat, lng);
-          } catch (_) {/* fail open — nearby list still loads without sharing */}
-        }
+        // H17: read the shareLocation/approxLocationOnly setting AUTHORITATIVELY
+        // from Firestore, not from auth.currentUser.settings — which never
+        // refreshes after Settings writes, so the opt-out was silently ignored
+        // and coordinates kept uploading. persistLocationIfAllowed fails closed.
+        try {
+          await persistLocationIfAllowed(
+              FirebaseFirestore.instance, uid: myUid, lat: _myLat!, lng: _myLng!);
+        } catch (_) {/* nearby list still loads even if the write fails */}
       }
     }
 

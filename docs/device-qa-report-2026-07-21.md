@@ -108,7 +108,7 @@ Play has required in-app account deletion since May 2024; the App Store requires
 | H14 ✅ **FIXED** | `real_providers.dart:1851` | `loadCandidates` has no try/catch around two Firestore reads. Offline or `permission-denied` leaves `_loading` stuck true → **Match tab is a permanent spinner** with no error and no retry. See below. |
 | H15 ✅ **FIXED** | `real_providers.dart:1870` | Candidate query excludes neither already-matched/passed users nor blocked users. **Passed profiles come straight back**, and `passUser` `add()`s a fresh doc per pass (duplicate rows forever). See below. |
 | H16 **[CODE]** | `settings_screen.dart:130-141` | All six push toggles are persisted to `users/{uid}.settings` and **read by nobody** — not by any Dart file, not by `functions/src/pushFanout.ts`. Turning off "Messages" changes nothing. |
-| H17 **[CODE]** | `nearby_users_screen.dart:135` | Location privacy reads `AuthProvider.currentUser.settings`, but Settings writes via `UserProvider.updateProfile`. `AuthProvider` never refreshes → **turning off location sharing has no effect until app restart**; coordinates keep uploading. |
+| H17 ✅ **FIXED** | `nearby_users_screen.dart:135` | Location privacy reads `AuthProvider.currentUser.settings`, but Settings writes via `UserProvider.updateProfile`. `AuthProvider` never refreshes → **turning off location sharing has no effect until app restart**; coordinates keep uploading. See below. |
 | H18 ✅ **FIXED** | `firestore.rules:296` | SafeCheck Visibility (Friends / Verified only) was **client-side only**. `safeChecks` was `allow read: if isAuth()` — any signed-in user could read every check-in's status, message, city and lat/lng. See below. |
 | H19 ✅ **FIXED** | `analytics_screen.dart:62`, `dashboard_screen.dart:15` | Business analytics iterate the **global** promotions/events collections, not `myPromotions(uid)`. **Business A sees Business B's** deal titles, views, saves and redemptions. See below. |
 | H20 **[CODE]** | `analytics_screen.dart:41`, `business_profile_screen.dart:119` | Growth `+12%`, Reach `8,420`, Engagement `4.2%`, Followers `2,840`, Events `3` are **hardcoded literals** presented as real metrics. Only the bar chart carries a "Demo chart" badge. |
@@ -233,6 +233,19 @@ Two problems in the conversation screen's data path:
 - `watchMessages` is bounded to the most recent 100 (queried newest-first + reversed for display). Single-field `orderBy`, so no composite index. This matches the usual chat default of showing recent history; **scroll-back pagination for older messages is a follow-up**, not built here.
 
 **Coverage:** `chat_logic_test.dart` (8 tests) — `chunked` boundaries, and `markMessagesReadIn` marking others' unread / skipping own / not duplicating / handling 900 messages across chunks. fake_cloud_firestore doesn't enforce the 500 cap, so the crash itself can't be reproduced in a unit test; the chunking that prevents it is covered structurally.
+
+### H17. Turning off location sharing kept uploading your coordinates — ✅ FIXED 2026-07-21
+`nearby_users_screen.dart`, `location_share_gate.dart`
+
+Nearby gated the location upload on `AuthProvider.currentUser.settings`. Settings writes through `UserProvider`, and `AuthProvider.currentUser` never refreshes — so `shareLocation: false` was invisible here and your coordinates kept uploading to `users/{uid}.lat/lng` on every Nearby open, indefinitely, until an app restart.
+
+Worse, it couldn't be fixed by just reading `UserProvider` instead: **`UserProvider.updateAuth` does `_currentUser = auth.currentUser` on every auth notify**, so even its freshly-fetched settings get clobbered back to the stale `AuthProvider` copy. Neither in-memory provider is a trustworthy source for a privacy gate.
+
+**Fix:** `persistLocationIfAllowed(db, uid, lat, lng)` reads the `shareLocation` / `approxLocationOnly` settings **authoritatively from Firestore** at the moment of the upload decision, sidestepping every cached copy. It **fails closed** — if the settings read throws (offline/permission), nothing is uploaded, the opposite of the old `catch (_) {/* fail open */}`. The two pure helpers (`shouldShareLocation`, `resolveCoordinateToPersist`) moved into the gate file alongside it.
+
+**Coverage:** `location_share_gate_test.dart` (5 tests) — no write when off, reads the *current* value not a stale one, exact vs. fuzzed coordinate, default-on when settings absent. The existing helper tests moved with them.
+
+**Residuals (noted, not fixed here):** the SafeCheck check-in call site still fuzzes with `user.settings` (stale `approxLocationOnly`) — a lesser concern since check-in is explicit consent, only the fuzz *precision* can lag. And the root cause — `UserProvider.updateAuth` clobbering fresh state — is exactly what the **provider DI refactor** would resolve properly; this fix routes around it for the one privacy-critical path.
 
 ## Missing components
 
