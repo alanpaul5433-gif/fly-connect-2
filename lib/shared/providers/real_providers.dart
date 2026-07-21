@@ -13,6 +13,7 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:crypto/crypto.dart';
 import '../utils/account_deletion.dart';
 import '../utils/block_list.dart';
+import '../utils/chat_logic.dart';
 import '../utils/match_logic.dart';
 import '../utils/user_posts.dart';
 import '../utils/image_compress.dart';
@@ -1181,9 +1182,9 @@ class PostProvider extends ChangeNotifier {
       ...comments.docs.map((d) => d.reference),
       ...likes.docs.map((d) => d.reference),
     ];
-    for (var i = 0; i < refs.length; i += 400) {
+    for (final group in chunked(refs, kWriteBatchLimit)) {
       final batch = _db.batch();
-      for (final ref in refs.sublist(i, min(i + 400, refs.length))) {
+      for (final ref in group) {
         batch.delete(ref);
       }
       await batch.commit();
@@ -1477,11 +1478,20 @@ class ChatProvider extends ChangeNotifier {
     });
   }
 
+  /// Most-recent messages, oldest→newest for display. H24: this used to stream
+  /// the ENTIRE history unbounded, re-emitting every message on each new one —
+  /// unbounded memory and read cost on a long chat. Bounded to the recent
+  /// window and queried newest-first + reversed. Scroll-back pagination to load
+  /// older messages is a follow-up; this matches the usual chat default of
+  /// showing recent history rather than everything.
+  static const int _messageWindow = 100;
+
   Stream<List<MessageModel>> watchMessages(String chatId) {
     if (isMock) return Stream.value(mockMessages[chatId] ?? []);
     return _db.collection('chats').doc(chatId).collection('messages')
-        .orderBy('createdAt').snapshots()
-        .map((s) => s.docs.map((d) => MessageModel.fromFirestore(d)).toList());
+        .orderBy('createdAt', descending: true).limit(_messageWindow).snapshots()
+        .map((s) => s.docs.map((d) => MessageModel.fromFirestore(d))
+            .toList().reversed.toList());
   }
 
   Future<void> sendMessage(String chatId, String text,
@@ -1574,18 +1584,14 @@ class ChatProvider extends ChangeNotifier {
   Future<void> markMessagesRead(String chatId) async {
     if (isMock) return;
     if (_uid == null) return;
-    final unseen = await _db.collection('chats').doc(chatId).collection('messages')
-        .where('senderId', isNotEqualTo: _uid).get();
-    final batch = _db.batch();
-    var hasWrites = false;
-    for (final doc in unseen.docs) {
-      final readBy = List<String>.from(doc.data()['readBy'] ?? []);
-      if (!readBy.contains(_uid)) {
-        batch.update(doc.reference, {'readBy': FieldValue.arrayUnion([_uid])});
-        hasWrites = true;
-      }
-    }
-    if (hasWrites) await batch.commit();
+    // H24: chunked below the 500-write batch cap — a chat with >500 unread used
+    // to throw one oversized batch straight out of initState. Also guarded:
+    // this is called fire-and-forget from initState, so a failure here (network
+    // / permission) must not surface as an unhandled async error — marking read
+    // is best-effort and the badge simply stays until the next open.
+    try {
+      await markMessagesReadIn(_db, chatId: chatId, uid: _uid!);
+    } catch (_) {}
   }
 
   Future<String> getOrCreateDm(String otherUid) async {

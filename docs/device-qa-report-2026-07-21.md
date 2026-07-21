@@ -115,7 +115,7 @@ Play has required in-app account deletion since May 2024; the App Store requires
 | H21 **[CODE]** | `promotion_detail_screen.dart:120` | "Show this QR code at the venue" is a 6×6 `GridView` coloured by `i % 3 == 0`. **It is not a QR code** and encodes nothing. Redemption counters are never incremented anywhere. |
 | H22 **[CODE]** | `group_details_screen.dart:461` | Members tab renders `Text('Member ${i+1}')` with the raw uid as subtitle. **Real names are never fetched**, though `GroupProvider.fetchMembers` exists and the business screen uses it. |
 | H23 **[CODE]** | `group_details_screen.dart:470`, `event_management_screen.dart:476` | Member "Message" pushes a **fabricated chat id** (`${uid}_dm`, `evt_{id}_{uid}`), bypassing `getOrCreateDm`. Messages land in a chat the recipient isn't a participant of — they never arrive. |
-| H24 **[CODE]** | `real_providers.dart:1390`, `:1484` | `watchMessages` has **no limit and no pagination**; `markMessagesRead` `get()`s every unread message and batches them — >500 unread exceeds the batch limit and throws uncaught from `initState`. |
+| H24 ✅ **FIXED** | `real_providers.dart:1390`, `:1484` | `watchMessages` has **no limit and no pagination**; `markMessagesRead` `get()`s every unread message and batches them — >500 unread exceeds the batch limit and throws uncaught from `initState`. See below. |
 | H25 **[CODE]** | `conversation_screen.dart:378` | `setTyping` fires on **every keystroke** (one Firestore write per character, no debounce) and is **never cleared** on send or dispose — the other party sees "typing…" forever. |
 
 ---
@@ -219,6 +219,20 @@ Both new queries are equality-only with no `orderBy`, so no composite index is n
 **Coverage:** `business_scope_test.dart` (6 tests), including the null-uid guard in both directions.
 
 **Honest limit — this is a UI fix, not a data-model fix.** The `promotions` read rule is `allow read: if isAuth()`, so `views` / `saves` / `currentRedemptions` sit on publicly-readable deal docs — a determined actor can still read a competitor's counts directly. Today those counters are static (the rule comments note the view/save/redeem *tracking* feature "doesn't exist yet"), so the exposure is latent. **When real tracking ships, those metrics must move to an owner-only-readable location** (a subcollection or side doc) to be genuinely private. Filed as the H19 follow-up.
+
+### H24. Opening a busy chat could crash; history loaded unbounded — ✅ FIXED 2026-07-21
+`ChatProvider`, `chat_logic.dart`
+
+Two problems in the conversation screen's data path:
+- **The crash.** `markMessagesRead` — called fire-and-forget from `initState` — read every non-own message and wrote them all in **one** batch. Firestore caps a batch at 500 writes, so a chat with >500 unread threw an uncaught exception out of `initState`, taking the screen down on open.
+- **Unbounded load.** `watchMessages` streamed the *entire* history with no limit, re-emitting every message on each new one — memory and read cost that grew without bound on a long chat.
+
+**Fix:**
+- `markMessagesReadIn` chunks the writes at `kWriteBatchLimit` (400, < the 500 cap), and the provider call is wrapped in try/catch so a best-effort mark-read never surfaces as an unhandled async error from `initState` — the unread badge simply persists to the next open.
+- `chunked()` is now the shared helper for both this and `deletePost`'s cascade (H13), which was doing the same thing inline.
+- `watchMessages` is bounded to the most recent 100 (queried newest-first + reversed for display). Single-field `orderBy`, so no composite index. This matches the usual chat default of showing recent history; **scroll-back pagination for older messages is a follow-up**, not built here.
+
+**Coverage:** `chat_logic_test.dart` (8 tests) — `chunked` boundaries, and `markMessagesReadIn` marking others' unread / skipping own / not duplicating / handling 900 messages across chunks. fake_cloud_firestore doesn't enforce the 500 cap, so the crash itself can't be reproduced in a unit test; the chunking that prevents it is covered structurally.
 
 ## Missing components
 
