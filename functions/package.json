@@ -14,7 +14,7 @@
     "test:integration:run": "jest --config jest.integration.config.js",
     "test:integration": "npm run build && cd .. && firebase emulators:exec --only firestore,functions --project demo-flyconnect-test \"npm --prefix functions run test:integration:run\"",
     "lint": "tsc --noEmit",
-    "test:rules:run": "jest --config jest.rules.config.js",
+    "test:rules:run": "jest --config jest.rules.config.js --runInBand",
     "test:rules": "cd .. && firebase emulators:exec --only firestore --project demo-flyconnect-test \"npm --prefix functions run test:rules:run\""
   },
   "dependencies": {

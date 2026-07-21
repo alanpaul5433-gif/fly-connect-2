@@ -54,7 +54,12 @@ service cloud.firestore {
               'followerCount','followingCount','postCount',
               'lastSeen','matchType','matchPrefs','settings','lat','lng'
             ]));
-      allow delete: if isAdmin();
+      // B3: was admin-only, which made in-app account deletion impossible —
+      // deleteAccount() failed with permission-denied on its very first write.
+      // Play (since May 2024) and the App Store both require a user to be able
+      // to delete their own account, so the owner must be able to delete this
+      // document.
+      allow delete: if isOwner(userId) || isAdmin();
 
       // PII (email, phone, fcmToken, dob) lives here instead of on the main
       // doc above, which any authed user can read — Firestore rules can only
@@ -71,10 +76,16 @@ service cloud.firestore {
       }
       match /followers/{followerId} {
         allow read: if isAuth();
-        // Only the follower themself may write their own follow relationship
+        // Only the follower themself may create their own follow relationship
         // (mirrors the posts/{postId}/likes/{userId} ownership pattern) —
         // tightened for C-3, since this doc now drives a real push notification.
-        allow write: if isOwner(followerId) && isNotBanned() && followerId != userId;
+        allow create, update: if isOwner(followerId) && isNotBanned()
+          && followerId != userId;
+        // Deletion is wider than creation on purpose: the follower may unfollow,
+        // AND the profile owner may remove a follower — which they must be able
+        // to do to erase their own account (B3). Creation stays follower-only so
+        // a follow still can't be forged.
+        allow delete: if isOwner(followerId) || isOwner(userId);
       }
       match /blocked/{blockedId} {
         allow read, write: if isOwner(userId);

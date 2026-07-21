@@ -65,13 +65,26 @@ A rules test pins this behaviour so the migration can't be quietly forgotten.
 
 **Also note:** viewing *another* user's posts by `authorId` is now denied unless the query also constrains `audience == 'Everyone'`. That matters when H7 (the profile grid) is fixed properly — the query must carry both clauses.
 
-### B3. Account deletion is non-atomic and incomplete **[CODE]**
-`real_providers.dart:303-361`
+### B3. Account deletion — ✅ FIXED 2026-07-21 (and it was worse than reported)
+`real_providers.dart:303-361`, `firestore.rules:57`
 
-- Firestore profile is deleted **before** `user.delete()`. Firebase throws `requires-recent-login` in the common case → profile gone, Auth account alive, user stranded with no recoverable state.
-- It wipes `users/{uid}/trips`, but trips live in the **top-level** `trips` collection (`:2043`). Trips, `safeChecks` (with lat/lng), `notifications`, event RSVPs and group memberships all survive deletion.
+The original report said deletion was non-atomic and incomplete. Writing rules tests revealed something more serious:
 
-Both Play and App Store audit deletion completeness, and the in-app dialog promises more than the code does.
+> **Account deletion has never worked at all.** `match /users/{userId}` carried `allow delete: if isAdmin();`, and `deleteAccount()` deleted the user document as its *first* write. Every attempt failed with permission-denied on step one and surfaced as the generic "Could not delete account: …". A second rule gap blocked clearing `users/{uid}/followers/*`, whose write rule required `isOwner(followerId)` — never the profile owner.
+
+Play has required in-app account deletion since May 2024; the App Store requires it too. This is a submission blocker, not a defect.
+
+**Fix applied:**
+- `firestore.rules` — `users/{userId}` is now `allow delete: if isOwner(userId) || isAdmin()`. The `followers` rule was split: `create, update` stay follower-only so a follow still can't be forged, while `delete` also permits the profile owner, which account erasure requires.
+- Erasure extracted to `lib/shared/utils/account_deletion.dart` (`purgeUserData(db, uid)`), following the existing `admin_gdpr_logic.dart` pattern of taking `db` as a parameter so it can be tested against `fake_cloud_firestore`. The old code was untestable, which is why nobody noticed it deleted a subcollection that does not exist.
+- **Wrong path fixed:** it wiped `users/{uid}/trips`; trips are top-level, keyed by `userId`. Now also erases `safeChecks` (which carry lat/lng), `notifications` and the `stories/{uid}` document.
+- **Ordering reversed.** `users/{uid}` is deleted **last**, so a mid-flight failure leaves a recoverable account rather than an authenticated user with no profile.
+- **Pre-flight freshness gate.** `user.metadata.lastSignInTime` is checked *before* anything is erased; a stale session now returns "Nothing has been deleted" instead of destroying data on a call Firebase was always going to refuse.
+- Mirrored follow entries (`users/{followed}/followers/{uid}`) are removed, so a departing user stops being counted as a follower everywhere they followed.
+
+**Coverage:** `test/shared/account_deletion_test.dart` (10 tests — completeness per collection, other users untouched, posts anonymised not destroyed, idempotent re-run) and `functions/test/rules/account-deletion.rules.test.ts` (10 rules tests proving every write the client must make is permitted, and that deleting *someone else's* profile or post still fails).
+
+**Known limitation, not fixed.** `users/{follower}/following/{uid}` — written by people who followed the departing user — is owned by that other user and cannot be deleted from the client under any correct rule. Those entries are orphaned. Cleaning them needs a privileged Cloud Function on user delete. Note that the original code's doc-comment claimed such a function already existed "in production"; **it does not** — there is no user-delete trigger anywhere in `functions/src`.
 
 ---
 

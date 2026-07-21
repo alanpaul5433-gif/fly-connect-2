@@ -11,6 +11,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:crypto/crypto.dart';
+import '../utils/account_deletion.dart';
 import '../utils/image_compress.dart';
 import '../utils/report_rate_limiter.dart';
 import '../models/models.dart';
@@ -290,16 +291,20 @@ class AuthProvider extends ChangeNotifier {
   /// Required by Google Play Store (since May 2024) and Apple App Store.
   ///
   /// Steps:
-  /// 1. Delete the top-level user doc `users/{uid}`
-  /// 2. Delete first-party subcollections under that user (savedPosts, blocked, following, followers, trips)
-  /// 3. Mark the user's posts as deleted (soft-delete) \u2014 we don't cascade-delete
-  ///    other users' replies/likes automatically; those are handled by a Cloud
-  ///    Function on the `users/{uid}` delete trigger in production.
-  /// 4. Sign the user out of Google / Apple
-  /// 5. Call `FirebaseAuth.currentUser!.delete()` \u2014 requires a recent login
+  /// 1. Verify the sign-in is recent enough for `user.delete()` to succeed \u2014
+  ///    BEFORE erasing anything (see below)
+  /// 2. Erase Firestore data via [purgeUserData], user doc last
+  /// 3. Sign the user out of Google / Apple
+  /// 4. Call `FirebaseAuth.currentUser!.delete()`
   ///
-  /// Returns `true` on success. On `requires-recent-login`, sets `_error`
-  /// and returns `false` so the caller can prompt the user to re-authenticate.
+  /// Ordering is the point. The original deleted `users/{uid}` first and called
+  /// `user.delete()` last, so the common `requires-recent-login` failure left
+  /// the profile destroyed and the Auth account alive \u2014 a signed-in user with
+  /// no profile document and no way back. The freshness pre-flight now fails
+  /// the operation before anything is erased.
+  ///
+  /// Returns `true` on success. On a stale session, sets `_error` and returns
+  /// `false` having changed nothing.
   Future<bool> deleteAccount() async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -308,39 +313,30 @@ class AuthProvider extends ChangeNotifier {
       return false;
     }
     final uid = user.uid;
+
+    // 1. Pre-flight. Firebase rejects delete() on a session older than a few
+    // minutes. Checking first keeps a doomed call from destroying data.
+    final lastSignIn = user.metadata.lastSignInTime;
+    if (lastSignIn == null ||
+        DateTime.now().difference(lastSignIn) > _recentLoginWindow) {
+      _error = 'For your security, please sign out and sign in again, '
+          'then delete your account. Nothing has been deleted.';
+      notifyListeners();
+      return false;
+    }
+
     _loading = true; _error = null; notifyListeners();
 
     try {
-      // 1. Wipe the user doc
-      await _db.collection('users').doc(uid).delete();
+      // 2. Erase Firestore data (user doc last \u2014 see purgeUserData).
+      await purgeUserData(_db, uid);
 
-      // 2. Wipe known subcollections (Firestore requires individual doc deletes)
-      await _deleteSubcollection(_db.collection('users').doc(uid).collection('savedPosts'));
-      await _deleteSubcollection(_db.collection('users').doc(uid).collection('blocked'));
-      await _deleteSubcollection(_db.collection('users').doc(uid).collection('following'));
-      await _deleteSubcollection(_db.collection('users').doc(uid).collection('followers'));
-      await _deleteSubcollection(_db.collection('users').doc(uid).collection('trips'));
-      await _deleteSubcollection(_db.collection('users').doc(uid).collection('private'));
-
-      // 3. Soft-delete user's posts (anonymize author)
-      final postSnap = await _db.collection('posts')
-          .where('authorId', isEqualTo: uid).get();
-      final batch = _db.batch();
-      for (final doc in postSnap.docs) {
-        batch.update(doc.reference, {
-          'authorName': '[deleted user]',
-          'authorPhotoUrl': null,
-          'isDeleted': true,
-        });
-      }
-      await batch.commit();
-
-      // 4. Sign out of Google (native only)
+      // 3. Sign out of Google (native only)
       if (!kIsWeb) {
         try { await GoogleSignIn().signOut(); } catch (_) {}
       }
 
-      // 5. Delete the Firebase Auth user
+      // 4. Delete the Firebase Auth user
       await user.delete();
 
       _currentUser = null;
@@ -348,7 +344,11 @@ class AuthProvider extends ChangeNotifier {
       return true;
     } on FirebaseAuthException catch (e) {
       if (e.code == 'requires-recent-login') {
-        _error = 'Please sign out and sign in again, then try deleting your account.';
+        // Should be unreachable thanks to the pre-flight, but a session can
+        // still age out mid-operation. The data is already gone at this point,
+        // so say so rather than implying a clean retry.
+        _error = 'Your data was removed, but the sign-in could not be deleted. '
+            'Sign in again and retry to finish removing your account.';
       } else {
         _error = e.message ?? 'Could not delete account.';
       }
@@ -361,23 +361,12 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> _deleteSubcollection(CollectionReference ref) async {
-    try {
-      final snap = await ref.limit(500).get();
-      if (snap.docs.isEmpty) return;
-      final batch = _db.batch();
-      for (final doc in snap.docs) {
-        batch.delete(doc.reference);
-      }
-      await batch.commit();
-      // Recurse if there were exactly 500 docs (Firestore batch max)
-      if (snap.docs.length == 500) {
-        await _deleteSubcollection(ref);
-      }
-    } catch (_) {
-      // Non-fatal \u2014 continue deletion of other subcollections
-    }
-  }
+  /// How recent a sign-in must be for `user.delete()` to be accepted. Firebase
+  /// does not document an exact figure; 5 minutes is the widely used value and
+  /// errs toward asking the user to re-authenticate rather than toward
+  /// destroying data on a call that will be refused.
+  static const Duration _recentLoginWindow = Duration(minutes: 5);
+
 
   Future<bool> resetPassword(String email) async {
     _loading = true; _error = null; notifyListeners();
