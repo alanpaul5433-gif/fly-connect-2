@@ -166,6 +166,15 @@ final List<_QuerySpec> _queries = [
     orderBy: 'createdAt',
   ),
   const _QuerySpec(
+    // H7. Viewing SOMEONE ELSE's profile must also pin audience, or the B2
+    // posts rule rejects the whole query. Viewing your own reuses the
+    // authorId-only spec above, since owning the docs is proof enough.
+    label: "another user's profile grid (PostProvider.watchUserPosts)",
+    collection: 'posts',
+    equalities: ['authorId', 'audience'],
+    orderBy: 'createdAt',
+  ),
+  const _QuerySpec(
     label: 'reported posts (admin content)',
     collection: 'posts',
     equalities: ['isReported'],

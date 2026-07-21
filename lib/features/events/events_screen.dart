@@ -10,6 +10,7 @@ import '../../shared/widgets/inline_error_banner.dart';
 import '../../shared/providers/event_provider.dart';
 import '../../shared/providers/auth_provider.dart';
 import '../../shared/models/models.dart';
+import 'events_filter.dart';
 import '../home/main_shell.dart' show AppDrawer;
 import '../../shared/widgets/cached_image.dart';
 
@@ -20,6 +21,7 @@ class EventsScreen extends StatefulWidget {
 
 class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderStateMixin {
   bool _nearbyEnabled = false;
+  EventsTab _tab = EventsTab.all;
   late TabController _tabs;
 
   @override
@@ -52,9 +54,18 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
       ),
       body: Consumer<EventProvider>(
         builder: (context, provider, _) {
-          final upcoming = provider.visibleEvents.where((e) => e.isUpcoming).toList();
-          final featured = upcoming.where((e) => e.isFeatured).toList();
-          final upcomingList = upcoming.where((e) => !e.isFeatured).toList();
+          // H4: all three tabs used to render this same derivation.
+          final tabEvents = eventsForTab(provider.visibleEvents, _tab);
+          // The carousel is a highlight strip above the list. On the Featured
+          // tab it would just duplicate the list, so there it stands down and
+          // the featured events become the list itself.
+          final onFeaturedTab = _tab == EventsTab.featured;
+          final featured = onFeaturedTab
+              ? const <EventModel>[]
+              : tabEvents.where((e) => e.isFeatured).toList();
+          final upcomingList = onFeaturedTab
+              ? tabEvents
+              : tabEvents.where((e) => !e.isFeatured).toList();
           final err = provider.eventsError;
 
           return RefreshIndicator(
@@ -98,7 +109,7 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
                   indicatorColor: AppColors.primary,
                   indicatorWeight: 3,
                   tabs: const [Tab(text: 'All'), Tab(text: 'Upcoming'), Tab(text: 'Featured')],
-                  onTap: (_) {},
+                  onTap: (i) => setState(() => _tab = EventsTab.values[i]),
                 )),
               const SizedBox(height: 16),
 
@@ -138,9 +149,28 @@ class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderSt
                   ]))),
               const SizedBox(height: 20),
 
-              // Upcoming events
-              const Padding(padding: EdgeInsets.symmetric(horizontal: 16),
-                child: SectionHeader(title: 'Upcoming Events', actionLabel: 'See All')),
+              // Section title tracks the tab, so the heading can't contradict
+              // the list under it (the Featured tab said "Upcoming Events").
+              Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: SectionHeader(
+                  title: switch (_tab) {
+                    EventsTab.all => 'All Events',
+                    EventsTab.upcoming => 'Upcoming Events',
+                    EventsTab.featured => 'Featured Events',
+                  },
+                  // H5: 'See All' was passed with no onAction — a dead
+                  // control. There is no separate all-events screen, so it
+                  // now does the only honest thing it can: switch to the All
+                  // tab. On All itself there is nothing more to see, so the
+                  // label is dropped rather than left inert.
+                  actionLabel: _tab == EventsTab.all ? null : 'See All',
+                  onAction: _tab == EventsTab.all
+                      ? null
+                      : () => setState(() {
+                            _tab = EventsTab.all;
+                            _tabs.animateTo(EventsTab.all.index);
+                          }),
+                )),
               const SizedBox(height: 12),
 
               if (upcomingList.isEmpty)

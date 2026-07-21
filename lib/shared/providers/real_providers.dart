@@ -13,6 +13,8 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:crypto/crypto.dart';
 import '../utils/account_deletion.dart';
 import '../utils/block_list.dart';
+import '../utils/match_logic.dart';
+import '../utils/user_posts.dart';
 import '../utils/image_compress.dart';
 import '../utils/report_rate_limiter.dart';
 import '../models/models.dart';
@@ -1038,6 +1040,21 @@ class PostProvider extends ChangeNotifier {
   /// `posts` docs on every bookmark-list change rather than filtering
   /// whatever happens to already be in [feed] — a saved post can easily have
   /// scrolled out of the feed's loaded window.
+  /// A profile's own posts, newest first.
+  ///
+  /// H7: the profile grid used to filter the global feed (newest 25 posts
+  /// app-wide) by authorId, so a user with posts outside that window saw
+  /// "No posts yet" directly under a non-zero post count.
+  Stream<List<PostModel>> watchUserPosts(String userId) {
+    if (isMock) {
+      return Stream.value(
+          mockPosts.where((p) => p.authorId == userId).toList());
+    }
+    return userPostsQuery(_db, authorId: userId, isSelf: userId == _uid)
+        .snapshots()
+        .map((s) => s.docs.map((d) => PostModel.fromFirestore(d)).toList());
+  }
+
   Stream<List<PostModel>> watchSavedPosts() {
     if (isMock) return Stream.value(const []);
     if (_uid == null) return Stream.value(const []);
@@ -1848,7 +1865,11 @@ class GroupProvider extends ChangeNotifier {
   static const int memberFetchCap = 60;
 
   Future<List<UserModel>> fetchMembers(List<String> memberUids) async {
-    if (isMock) return const [];
+    // Mock mode returned an empty list, which since H22 would render every
+    // member row as a bare uid.
+    if (isMock) {
+      return mockUsers.where((u) => memberUids.contains(u.uid)).toList();
+    }
     final capped = memberUids.take(memberFetchCap).toList();
     final results = <UserModel>[];
     for (var i = 0; i < capped.length; i += 30) {
@@ -1970,34 +1991,45 @@ class MatchProvider extends ChangeNotifier {
     _loading = false; notifyListeners();
   }
 
-  Future<void> likeUser(String targetUid, String matchType) async {
+  /// Likes [targetUid] and reports whether that produced a MUTUAL match.
+  ///
+  /// The return value exists so the screen can stop claiming "It's a Match!"
+  /// after every like (H1). Callers must not assume true.
+  Future<bool> likeUser(String targetUid, String matchType) async {
     _candidates.removeWhere((u) => u.uid == targetUid);
     if (isMock) {
-      if (DateTime.now().millisecond % 2 == 0) {
-        final matched = mockUsers.where((u) => u.uid == targetUid).firstOrNull;
-        if (matched != null) {
-          _matches.add(MatchModel(id: 'match_$targetUid', userA: _uid ?? 'user_001',
-            userB: targetUid, status: 'matched', matchType: matchType,
-            likedAt: DateTime.now(), matchedAt: DateTime.now()));
-        }
+      // Mock mode alternates deterministically on the target uid rather than
+      // on the wall clock. `DateTime.now().millisecond % 2` made this a coin
+      // flip that produced a different result for the same tap each run —
+      // untestable, and impossible to demo either state on purpose.
+      final matched = mockUsers.where((u) => u.uid == targetUid).firstOrNull;
+      final isMatch = matched != null && targetUid.hashCode.isEven;
+      if (isMatch) {
+        _matches.add(MatchModel(id: 'match_$targetUid', userA: _uid ?? 'user_001',
+          userB: targetUid, status: 'matched', matchType: matchType,
+          likedAt: DateTime.now(), matchedAt: DateTime.now()));
       }
-      notifyListeners(); return;
+      notifyListeners();
+      return isMatch;
     }
-    if (_uid == null) return;
-    final existing = await _db.collection('matches')
-        .where('userA', isEqualTo: targetUid).where('userB', isEqualTo: _uid)
-        .where('status', isEqualTo: 'pending').get();
-    if (existing.docs.isNotEmpty) {
-      await existing.docs.first.reference.update({'status': 'matched', 'matchedAt': FieldValue.serverTimestamp()});
-      _matches.add(MatchModel(id: existing.docs.first.id, userA: targetUid, userB: _uid!,
-        status: 'matched', matchType: matchType, likedAt: DateTime.now(), matchedAt: DateTime.now()));
-    } else {
-      await _db.collection('matches').add({
-        'userA': _uid, 'userB': targetUid, 'status': 'pending',
-        'matchType': matchType, 'likedAt': FieldValue.serverTimestamp(),
-      });
+    if (_uid == null) return false;
+
+    final bool isMatch;
+    try {
+      isMatch = await recordLike(_db,
+          myUid: _uid!, targetUid: targetUid, matchType: matchType);
+    } catch (_) {
+      // Never claim a match we couldn't confirm.
+      notifyListeners();
+      return false;
+    }
+    if (isMatch) {
+      _matches.add(MatchModel(id: 'match_$targetUid', userA: targetUid, userB: _uid!,
+        status: 'matched', matchType: matchType,
+        likedAt: DateTime.now(), matchedAt: DateTime.now()));
     }
     notifyListeners();
+    return isMatch;
   }
 
   Future<void> passUser(String targetUid) async {

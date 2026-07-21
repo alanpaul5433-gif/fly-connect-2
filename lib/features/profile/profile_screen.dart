@@ -739,10 +739,27 @@ class _PostsGrid extends StatelessWidget {
   const _PostsGrid({required this.userId});
   @override
   Widget build(BuildContext context) {
-    return Consumer<PostProvider>(
-      builder: (context, provider, _) {
-        // Only this profile's own posts — not the global feed.
-        final posts = provider.feed.where((p) => p.authorId == userId).toList();
+    // H7: this used to filter `provider.feed` — the newest 25 posts GLOBALLY —
+    // by authorId, so the grid showed a user's posts only if they happened to
+    // land in that window. Now it queries their posts directly.
+    return StreamBuilder<List<PostModel>>(
+      stream: context.read<PostProvider>().watchUserPosts(userId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: CircularProgressIndicator(color: AppColors.primary),
+            ));
+        }
+        if (snapshot.hasError) {
+          return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.error_outline, size: 48, color: Colors.grey.shade300),
+            const SizedBox(height: 8),
+            const Text('Could not load posts', style: TextStyle(color: Colors.grey)),
+          ]));
+        }
+        final posts = snapshot.data ?? const <PostModel>[];
         if (posts.isEmpty) {
           return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(Icons.grid_view_outlined, size: 48, color: Colors.grey.shade300),

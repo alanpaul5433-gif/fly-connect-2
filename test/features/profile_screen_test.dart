@@ -36,6 +36,10 @@ Future<void> _pumpOwnProfile(WidgetTester tester, {required UserModel currentUse
   when(() => userProvider.getMyStory(any())).thenAnswer((_) async => null);
   when(() => postProvider.feed).thenReturn(const []);
   when(() => postProvider.likedPostIds).thenReturn(const {});
+  // H7: the post grid queries the user's posts directly now instead of
+  // filtering the global feed.
+  when(() => postProvider.watchUserPosts(any()))
+      .thenAnswer((_) => Stream.value(const <PostModel>[]));
 
   await tester.pumpWidget(
     MultiProvider(

@@ -17,6 +17,16 @@
       ]
     },
     {
+      "comment": "H7 — another user's profile grid. Reading someone else's posts must pin audience == 'Everyone' to satisfy the B2 read rule, so authorId alone is not enough.",
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "authorId",  "order": "ASCENDING" },
+        { "fieldPath": "audience",  "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "events",
       "queryScope": "COLLECTION",
       "fields": [

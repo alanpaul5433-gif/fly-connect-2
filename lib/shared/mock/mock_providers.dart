@@ -230,18 +230,21 @@ class MatchProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> likeUser(String targetUid, String matchType) async {
+  /// Returns whether the like produced a mutual match — see the real
+  /// MatchProvider.likeUser. Keyed off the target uid rather than the wall
+  /// clock so the same card gives the same answer every run.
+  Future<bool> likeUser(String targetUid, String matchType) async {
     _candidates.removeWhere((u) => u.uid == targetUid);
-    if (DateTime.now().millisecond % 2 == 0) {
-      final matched = mockUsers.where((u) => u.uid == targetUid).firstOrNull;
-      if (matched != null) {
-        _matches.add(MatchModel(
-          id: 'match_$targetUid', userA: 'user_001', userB: targetUid,
-          status: 'matched', matchType: matchType,
-          likedAt: DateTime.now(), matchedAt: DateTime.now()));
-      }
+    final matched = mockUsers.where((u) => u.uid == targetUid).firstOrNull;
+    final isMatch = matched != null && targetUid.hashCode.isEven;
+    if (isMatch) {
+      _matches.add(MatchModel(
+        id: 'match_$targetUid', userA: 'user_001', userB: targetUid,
+        status: 'matched', matchType: matchType,
+        likedAt: DateTime.now(), matchedAt: DateTime.now()));
     }
     notifyListeners();
+    return isMatch;
   }
 
   Future<void> passUser(String targetUid) async {

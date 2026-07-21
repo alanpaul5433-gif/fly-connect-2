@@ -14,6 +14,7 @@ import '../../shared/widgets/confirm_dialog.dart';
 import '../../shared/widgets/shared_widgets.dart';
 import '../../shared/widgets/cached_image.dart';
 import '../../shared/widgets/organizer_row.dart';
+import '../../shared/utils/open_chat.dart';
 
 class GroupDetailsScreen extends StatefulWidget {
   final String groupId;
@@ -387,11 +388,34 @@ class _MembersTab extends StatefulWidget {
 
 class _MembersTabState extends State<_MembersTab> {
   late List<String> _members;
+  /// uid -> profile, for the members we managed to resolve. H22: this tab
+  /// rendered `Member 1`, `Member 2` … with the raw uid as the subtitle, even
+  /// though GroupProvider.fetchMembers already existed and the business
+  /// screens used it. Members not in this map fall back to the uid, so a
+  /// failed or capped lookup degrades a row instead of emptying the list.
+  Map<String, UserModel> _profiles = const {};
 
   @override
   void initState() {
     super.initState();
     _members = List.from(widget.members);
+    _loadProfiles();
+  }
+
+  Future<void> _loadProfiles() async {
+    try {
+      final users = await context.read<GroupProvider>().fetchMembers(_members);
+      if (!mounted) return;
+      setState(() => _profiles = {for (final u in users) u.uid: u});
+    } catch (_) {
+      // Names are a nicety; the list still works without them.
+    }
+  }
+
+  /// Display name for a member row, or null when we couldn't resolve one.
+  String? _nameFor(String uid) {
+    final name = _profiles[uid]?.name.trim();
+    return (name == null || name.isEmpty) ? null : name;
   }
 
   bool get _isAdmin {
@@ -455,19 +479,44 @@ class _MembersTabState extends State<_MembersTab> {
         itemCount: _members.length,
         itemBuilder: (_, i) {
           final uid = _members[i];
+          final profile = _profiles[uid];
+          final name = _nameFor(uid);
+          // Falls back to the uid rather than an invented "Member 3": a raw id
+          // at least identifies someone real.
+          final title = name ?? uid;
+          final avatarLetter = (name ?? uid).isNotEmpty
+              ? (name ?? uid)[0].toUpperCase()
+              : '?';
           return ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-            leading: CircleAvatar(backgroundColor: AppColors.dark,
-              child: Text(uid.isNotEmpty ? uid[0].toUpperCase() : '?',
+            leading: CachedAvatar(
+              url: profile?.photoUrl,
+              radius: 20,
+              backgroundColor: AppColors.dark,
+              fallback: Text(avatarLetter,
                 style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold))),
-            title: Text('Member ${i + 1}', style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text(uid, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+            title: Text(title,
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: profile?.airline != null && profile!.airline!.isNotEmpty
+              ? Text([profile.airline, profile.position]
+                    .where((s) => s != null && s.isNotEmpty).join(' · '),
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: AppColors.textSecondary))
+              : null,
             onTap: () => context.push('/users/$uid'),
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(
                 icon: const Icon(Icons.chat_bubble_outline, size: 18, color: AppColors.primary),
                 tooltip: 'Message member',
-                onPressed: () => context.push('/conversation/${uid}_dm?name=Member+${i + 1}'),
+                // H23: this pushed a FABRICATED chat id (`${uid}_dm`), so
+                // messages landed in a chat the recipient was not a
+                // participant of and never arrived. OpenChat goes through
+                // getOrCreateDm, and carries otherUid so block/report work.
+                onPressed: () => OpenChat.withUser(context,
+                  otherUid: uid,
+                  otherName: name ?? 'Member',
+                  otherPhotoUrl: profile?.photoUrl),
                 padding: EdgeInsets.zero, constraints: const BoxConstraints(),
               ),
               if (_isAdmin) ...[

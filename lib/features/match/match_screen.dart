@@ -19,7 +19,10 @@ class MatchScreen extends StatefulWidget {
 
 class _MatchScreenState extends State<MatchScreen> with SingleTickerProviderStateMixin {
   String _matchType = 'buddy'; // buddy | dating | solo
-  bool _showMatchBanner = false;
+  /// The person we actually matched with, held separately from the candidate
+  /// list because that list has already moved on by the time the banner shows.
+  /// Non-null means the banner is visible.
+  UserModel? _matchedWith;
   late AnimationController _animCtrl;
   late Animation<Offset> _slideAnim;
 
@@ -38,15 +41,21 @@ class _MatchScreenState extends State<MatchScreen> with SingleTickerProviderStat
   void dispose() { _animCtrl.dispose(); super.dispose(); }
 
   Future<void> _like(UserModel user) async {
-    await context.read<MatchProvider>().likeUser(user.uid, _matchType);
-    // Check if it's a match (simplified — real check happens via Firestore listener)
-    setState(() => _showMatchBanner = true);
+    final isMatch = await context.read<MatchProvider>().likeUser(user.uid, _matchType);
+    // H1: the banner used to fire on every like. The provider always knew
+    // whether the like was mutual; likeUser just returned void, so there was
+    // nothing to branch on.
+    if (!isMatch || !mounted) return;
+    // H2: hold on to the person actually matched. The banner used to read
+    // `provider.candidates.first`, but likeUser removes the liked candidate
+    // first — so that is the NEXT card, and the banner named the wrong person.
+    setState(() => _matchedWith = user);
     _animCtrl.forward();
     await Future.delayed(const Duration(seconds: 3));
     if (mounted) {
       _animCtrl.reverse();
       await Future.delayed(const Duration(milliseconds: 350));
-      if (mounted) setState(() => _showMatchBanner = false);
+      if (mounted) setState(() => _matchedWith = null);
     }
   }
 
@@ -93,44 +102,52 @@ class _MatchScreenState extends State<MatchScreen> with SingleTickerProviderStat
         // Card stack
         Expanded(child: Consumer<MatchProvider>(
           builder: (context, provider, _) {
+            final Widget cards;
             if (provider.loading) {
-              return const Center(
-              child: CircularProgressIndicator(color: AppColors.primary));
+              cards = const Center(
+                child: CircularProgressIndicator(color: AppColors.primary));
+            } else if (provider.candidates.isEmpty) {
+              cards = _NoMoreCards(onRefresh: () => provider.loadCandidates());
+            } else {
+              final user = provider.candidates.first;
+              cards = Stack(children: [
+                // Background card peek
+                if (provider.candidates.length > 1) Positioned(
+                  left: 28, right: 28, top: 8, bottom: 28,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(24)),
+                  )),
+                // Main swipe card
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: _SwipeCard(
+                    user: user,
+                    onLike: () => _like(user),
+                    onPass: () => _pass(user),
+                    matchType: _matchType,
+                  )),
+              ]);
             }
-            if (provider.candidates.isEmpty) {
-              return _NoMoreCards(
-              onRefresh: () => provider.loadCandidates());
-            }
-            final user = provider.candidates.first;
+
+            // The banner is layered OUTSIDE the card branches on purpose:
+            // liking your last remaining candidate empties the list, and when
+            // the banner lived inside that branch the empty-state early return
+            // meant the one match you did get was the one you never saw.
+            final matched = _matchedWith;
             return Stack(children: [
-              // Background card peek
-              if (provider.candidates.length > 1) Positioned(
-                left: 28, right: 28, top: 8, bottom: 28,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(24)),
-                )),
-              // Main swipe card
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: _SwipeCard(
-                  user: user,
-                  onLike: () => _like(user),
-                  onPass: () => _pass(user),
-                  matchType: _matchType,
-                )),
-              // Match banner
-              if (_showMatchBanner)
+              cards,
+              if (matched != null)
                 Positioned(top: 0, left: 0, right: 0,
                   child: SlideTransition(position: _slideAnim,
-                    child: _MatchBanner(user: user,
+                    child: _MatchBanner(user: matched,
                       onMessage: () async {
                         await OpenChat.withUser(
                           context,
-                          otherUid: user.uid,
-                          otherName: user.name,
-                          otherPhotoUrl: user.photoUrl,
+                          otherUid: matched.uid,
+                          otherName: matched.name,
+                          otherPhotoUrl: matched.photoUrl,
                         );
                       }))),
             ]);
@@ -311,7 +328,12 @@ class _MatchBanner extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(color: AppColors.dark, borderRadius: BorderRadius.circular(20),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 20)]),
-      child: Column(children: [
+      // H3: the banner overflowed the right screen edge — text clipped
+      // mid-word and the button running off-screen. It sits in a Positioned
+      // with top/left/right and no bottom, so its height is UNBOUNDED, and a
+      // Column defaults to mainAxisSize.max — it tried to take infinite
+      // height. Constraining it to its children fixes the layout.
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
         const Text('🎉 It\'s a Match!', style: TextStyle(color: AppColors.primary, fontSize: 22, fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         Text('You and ${user.name} liked each other!',

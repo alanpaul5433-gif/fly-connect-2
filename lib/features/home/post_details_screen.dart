@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../../core/constants/app_colors.dart';
@@ -23,9 +24,25 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
   int _likeCount = 0;
   late PostModel _post;
 
-  void _sharePost() {
-    final link = 'https://flyconnect.co/posts/${widget.post.id}';
-    Clipboard.setData(ClipboardData(text: link));
+  String get _postLink => 'https://flyconnect.co/posts/${widget.post.id}';
+
+  /// Opens the native share sheet, falling back to the clipboard where one
+  /// isn't available. Mirrors `_shareProfile` in profile_screen.dart.
+  Future<void> _sharePost() async {
+    try {
+      await SharePlus.instance.share(
+        ShareParams(text: 'Post on FlyConnect\n$_postLink',
+            subject: 'Post on FlyConnect'),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      await _copyPostLink();
+    }
+  }
+
+  Future<void> _copyPostLink() async {
+    await Clipboard.setData(ClipboardData(text: _postLink));
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
       content: Text('Post link copied to clipboard'),
       duration: Duration(seconds: 2),
@@ -266,8 +283,17 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
               ));
             }
           }),
-      ListTile(leading: const Icon(Icons.share_outlined), title: const Text('Share'), onTap: () => Navigator.pop(context)),
-      ListTile(leading: const Icon(Icons.link), title: const Text('Copy link'), onTap: () => Navigator.pop(context)),
+      // H6: both of these were `onTap: () => Navigator.pop(context)` — the
+      // sheet closed and nothing else happened, with no feedback either way.
+      // _sharePost already existed but was only reachable from the toolbar.
+      ListTile(
+        leading: const Icon(Icons.share_outlined),
+        title: const Text('Share'),
+        onTap: () { Navigator.pop(context); _sharePost(); }),
+      ListTile(
+        leading: const Icon(Icons.link),
+        title: const Text('Copy link'),
+        onTap: () { Navigator.pop(context); _copyPostLink(); }),
     ])));
   }
 
