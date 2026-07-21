@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/providers/providers.dart';
+import 'business_scope.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -12,10 +13,14 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = context.watch<UserProvider>().currentUser;
     final name = user?.name ?? 'Business';
-    final activePromoCount = context.watch<PromotionProvider>().activePromotions.length;
-    final totalPromoViews = context.watch<PromotionProvider>().promotions
-        .fold<int>(0, (sum, p) => sum + p.views);
-    final upcomingEventCount = context.watch<EventProvider>().events
+    // H19: every headline number here is scoped to THIS business. Previously
+    // they summed across every business's promotions and events.
+    final myPromos = ownPromotions(
+        context.watch<PromotionProvider>().promotions, user?.uid);
+    final activePromoCount = myPromos.where((p) => p.isActive && p.isApproved).length;
+    final totalPromoViews = myPromos.fold<int>(0, (sum, p) => sum + p.views);
+    final upcomingEventCount = ownEvents(
+        context.watch<EventProvider>().events, user?.uid)
         .where((e) => e.date.isAfter(DateTime.now())).length;
     final followerCount = user?.followerCount ?? 0;
 
@@ -175,8 +180,12 @@ class _QuickAction extends StatelessWidget {
 class _RecentActivitySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final promotions = context.watch<PromotionProvider>().promotions;
-    final events = context.watch<EventProvider>().events;
+    // H19: "recent activity" (top promotion, redemption leader, top event) is
+    // this business's own, not whichever business happens to lead globally.
+    final me = context.watch<UserProvider>().currentUser?.uid;
+    final promotions = ownPromotions(
+        context.watch<PromotionProvider>().promotions, me);
+    final events = ownEvents(context.watch<EventProvider>().events, me);
 
     final items = <_ActivityItem>[];
 

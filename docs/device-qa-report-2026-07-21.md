@@ -110,7 +110,7 @@ Play has required in-app account deletion since May 2024; the App Store requires
 | H16 **[CODE]** | `settings_screen.dart:130-141` | All six push toggles are persisted to `users/{uid}.settings` and **read by nobody** — not by any Dart file, not by `functions/src/pushFanout.ts`. Turning off "Messages" changes nothing. |
 | H17 **[CODE]** | `nearby_users_screen.dart:135` | Location privacy reads `AuthProvider.currentUser.settings`, but Settings writes via `UserProvider.updateProfile`. `AuthProvider` never refreshes → **turning off location sharing has no effect until app restart**; coordinates keep uploading. |
 | H18 ✅ **FIXED** | `firestore.rules:296` | SafeCheck Visibility (Friends / Verified only) was **client-side only**. `safeChecks` was `allow read: if isAuth()` — any signed-in user could read every check-in's status, message, city and lat/lng. See below. |
-| H19 **[CODE]** | `analytics_screen.dart:62`, `dashboard_screen.dart:15` | Business analytics iterate the **global** promotions/events collections, not `myPromotions(uid)`. **Business A sees Business B's** deal titles, views, saves and redemptions. |
+| H19 ✅ **FIXED** | `analytics_screen.dart:62`, `dashboard_screen.dart:15` | Business analytics iterate the **global** promotions/events collections, not `myPromotions(uid)`. **Business A sees Business B's** deal titles, views, saves and redemptions. See below. |
 | H20 **[CODE]** | `analytics_screen.dart:41`, `business_profile_screen.dart:119` | Growth `+12%`, Reach `8,420`, Engagement `4.2%`, Followers `2,840`, Events `3` are **hardcoded literals** presented as real metrics. Only the bar chart carries a "Demo chart" badge. |
 | H21 **[CODE]** | `promotion_detail_screen.dart:120` | "Show this QR code at the venue" is a 6×6 `GridView` coloured by `i % 3 == 0`. **It is not a QR code** and encodes nothing. Redemption counters are never incremented anywhere. |
 | H22 **[CODE]** | `group_details_screen.dart:461` | Members tab renders `Text('Member ${i+1}')` with the raw uid as subtitle. **Real names are never fetched**, though `GroupProvider.fetchMembers` exists and the business screen uses it. |
@@ -208,6 +208,17 @@ Both new queries are equality-only with no `orderBy`, so no composite index is n
 - Own passport keeps the live `TripProvider.trips` stream and edit controls. A foreign one uses a new `watchUserTrips(userId)` stream (the `trips` read rule already allows `isAuth()`, and the `userId + startDate` index already exists). Title becomes "Trips", the Add action and every Delete are gone, and the empty state speaks about them, not you.
 
 **Coverage:** `passport_ownership_test.dart` (5 tests) pins the ownership decision — including the two signed-out edge cases, where it must never grant edit over anyone. The screen wiring is verified by reading (presentation layer) and on device.
+
+### H19. Business analytics showed every OTHER business's numbers — ✅ FIXED (UI) 2026-07-21
+`analytics_screen.dart`, `dashboard_screen.dart`, `business_scope.dart`
+
+`PromotionProvider` streams the whole `promotions` collection — correct, because the public "Crew Deals" feed needs every active deal. But the analytics and dashboard screens aggregated that **raw** list: top promotion, total views, active-deal count, redemption leader, recent activity were all computed across every business. Business A's dashboard showed Business B's titles, views, saves and redemptions as its own. `myPromotions(uid)` existed and simply wasn't used; the "upcoming events" tile leaked the same way over the global events list.
+
+**Fix:** `ownPromotions(all, businessId)` / `ownEvents(all, businessId)` scope every aggregation to the signed-in business. A **null uid returns nothing, not everything** — "show all" was exactly the leak, so the failure mode is empty, not global. Applied at all five sites across the two screens.
+
+**Coverage:** `business_scope_test.dart` (6 tests), including the null-uid guard in both directions.
+
+**Honest limit — this is a UI fix, not a data-model fix.** The `promotions` read rule is `allow read: if isAuth()`, so `views` / `saves` / `currentRedemptions` sit on publicly-readable deal docs — a determined actor can still read a competitor's counts directly. Today those counters are static (the rule comments note the view/save/redeem *tracking* feature "doesn't exist yet"), so the exposure is latent. **When real tracking ships, those metrics must move to an owner-only-readable location** (a subcollection or side doc) to be genuinely private. Filed as the H19 follow-up.
 
 ## Missing components
 

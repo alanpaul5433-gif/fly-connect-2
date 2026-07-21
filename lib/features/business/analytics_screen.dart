@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/providers/providers.dart';
+import 'business_scope.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -59,9 +60,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final bars = _currentBars;
     final maxBar = bars.reduce((a, b) => a > b ? a : b).toDouble();
     final m = _metrics;
-    final promotions = context.watch<PromotionProvider>().promotions;
     // Use real follower count from provider; keep other metrics as trend indicators
-    final realFollowers = context.watch<UserProvider>().currentUser?.followerCount ?? 0;
+    final me = context.watch<UserProvider>().currentUser;
+    final realFollowers = me?.followerCount ?? 0;
+    // H19: scope to THIS business. The provider streams every business's
+    // promotions (the public Crew Deals feed needs them); aggregating that raw
+    // list showed Business A the titles/views/saves/redemptions of Business B.
+    final promotions = ownPromotions(
+        context.watch<PromotionProvider>().promotions, me?.uid);
 
     return Scaffold(
       backgroundColor: AppColors.background,
