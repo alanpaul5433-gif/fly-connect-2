@@ -110,8 +110,8 @@ Future<UserModel?> _fetchSelfWithPrivate(FirebaseFirestore db, String uid) async
 
 // ─── Real Auth Provider ──────────────────────────────────────
 class AuthProvider extends ChangeNotifier {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseAuth _auth;
+  final FirebaseFirestore _db;
   UserModel? _currentUser;
   bool _loading = false;
   String? _error;
@@ -135,7 +135,9 @@ class AuthProvider extends ChangeNotifier {
   final Completer<void> _authReadyCompleter = Completer<void>();
   Future<void> get authReady => _authReadyCompleter.future;
 
-  AuthProvider({this.isMock = false}) {
+  AuthProvider({this.isMock = false, FirebaseFirestore? db, FirebaseAuth? auth})
+      : _db = db ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance {
     if (!isMock) {
       _authSub = _auth.authStateChanges().listen((user) async {
         if (user != null) {
@@ -645,14 +647,15 @@ class AuthProvider extends ChangeNotifier {
 // ─── Real User Provider ──────────────────────────────────────
 class UserProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
   UserModel? _currentUser;
   final Set<String> _following = {};
 
   UserModel? get currentUser => _currentUser;
   bool get loading => false;
 
-  UserProvider({this.isMock = false}) {
+  UserProvider({this.isMock = false, FirebaseFirestore? db})
+      : _db = db ?? FirebaseFirestore.instance {
     if (isMock) _following.addAll({'user_002', 'user_006'});
   }
 
@@ -807,8 +810,8 @@ class UserProvider extends ChangeNotifier {
 // ─── Real Post Provider ──────────────────────────────────────
 class PostProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _db;
+  final FirebaseAuth _auth;
   List<PostModel> _feed = [];
   final Set<String> _liked = {};
   final Set<String> _saved = {};
@@ -831,7 +834,9 @@ class PostProvider extends ChangeNotifier {
   String? get _uid => isMock ? (_storedAuth?.currentUser?.uid ?? 'user_001') : _auth.currentUser?.uid;
   StreamSubscription? _feedSub;
 
-  PostProvider({this.isMock = false}) {
+  PostProvider({this.isMock = false, FirebaseFirestore? db, FirebaseAuth? auth})
+      : _db = db ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance {
     if (isMock) {
       _feed = List.from(mockPosts);
       _liked.add('post_003');
@@ -1426,8 +1431,8 @@ class PostProvider extends ChangeNotifier {
 // ─── Real Chat Provider ──────────────────────────────────────
 class ChatProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _db;
+  final FirebaseAuth _auth;
   List<ChatModel> _chats = [];
   StreamSubscription? _chatsSub;
   AuthProvider? _storedAuth;
@@ -1446,7 +1451,9 @@ class ChatProvider extends ChangeNotifier {
 
   String? get _uid => isMock ? (_storedAuth?.currentUser?.uid ?? 'user_001') : _auth.currentUser?.uid;
 
-  ChatProvider({this.isMock = false}) {
+  ChatProvider({this.isMock = false, FirebaseFirestore? db, FirebaseAuth? auth})
+      : _db = db ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance {
     if (isMock) _chats = List.from(mockChats);
   }
 
@@ -1664,8 +1671,8 @@ class ChatProvider extends ChangeNotifier {
 // ─── Real Event Provider ─────────────────────────────────────
 class EventProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _db;
+  final FirebaseAuth _auth;
   List<EventModel> _events = [];
   final Set<String> _rsvpd = {};
   StreamSubscription? _eventsSub;
@@ -1689,7 +1696,9 @@ class EventProvider extends ChangeNotifier {
 
   String? get _uid => isMock ? (_storedAuth?.currentUser?.uid ?? 'user_001') : _auth.currentUser?.uid;
 
-  EventProvider({this.isMock = false}) {
+  EventProvider({this.isMock = false, FirebaseFirestore? db, FirebaseAuth? auth})
+      : _db = db ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance {
     if (isMock) { _events = List.from(mockEvents); _rsvpd.add('evt_004'); }
   }
 
@@ -1807,8 +1816,8 @@ class EventProvider extends ChangeNotifier {
 // ─── Real Group Provider ─────────────────────────────────────
 class GroupProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _db;
+  final FirebaseAuth _auth;
   List<GroupModel> _groups = [];
   final Set<String> _joined = {};
   StreamSubscription? _groupsSub;
@@ -1817,7 +1826,9 @@ class GroupProvider extends ChangeNotifier {
   List<GroupModel> get myGroups => _groups.where((g) => _joined.contains(g.id)).toList();
   String? get _uid => isMock ? null : _auth.currentUser?.uid;
 
-  GroupProvider({this.isMock = false}) {
+  GroupProvider({this.isMock = false, FirebaseFirestore? db, FirebaseAuth? auth})
+      : _db = db ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance {
     if (isMock) { _groups = List.from(mockGroups); _joined.addAll({'grp_001', 'grp_002'}); }
   }
 
@@ -1949,8 +1960,8 @@ class GroupProvider extends ChangeNotifier {
 // ─── Real Match Provider ─────────────────────────────────────
 class MatchProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _db;
+  final FirebaseAuth _auth;
   List<UserModel> _candidates = [];
   final List<MatchModel> _matches = [];
   bool _loading = false;
@@ -1966,7 +1977,9 @@ class MatchProvider extends ChangeNotifier {
   List<MatchModel> get matches => _matches;
   String? get _uid => isMock ? (_storedAuth?.currentUser?.uid ?? 'user_001') : _auth.currentUser?.uid;
 
-  MatchProvider({this.isMock = false}) {
+  MatchProvider({this.isMock = false, FirebaseFirestore? db, FirebaseAuth? auth})
+      : _db = db ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance {
     if (isMock) _candidates = List.from(mockUsers);
   }
 
@@ -2088,7 +2101,7 @@ String describeNotificationsError(Object err) {
 // ─── Real Notification Provider ──────────────────────────────
 class NotificationProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
   List<NotificationModel> _notifications = [];
   StreamSubscription? _notifSub;
   AuthProvider? _storedAuth;
@@ -2100,7 +2113,8 @@ class NotificationProvider extends ChangeNotifier {
   /// Non-null when the notifications stream has reported a failure.
   String? get notificationsError => _notificationsError;
 
-  NotificationProvider({this.isMock = false}) {
+  NotificationProvider({this.isMock = false, FirebaseFirestore? db})
+      : _db = db ?? FirebaseFirestore.instance {
     if (isMock) _notifications = List.from(mockNotifications);
   }
 
@@ -2180,13 +2194,14 @@ class NotificationProvider extends ChangeNotifier {
 // ─── Real Trip Provider ──────────────────────────────────────
 class TripProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
   List<TripModel> _trips = [];
   StreamSubscription? _tripsSub;
 
   List<TripModel> get trips => _trips;
 
-  TripProvider({this.isMock = false}) {
+  TripProvider({this.isMock = false, FirebaseFirestore? db})
+      : _db = db ?? FirebaseFirestore.instance {
     if (isMock) _trips = List.from(mockTrips);
   }
 
@@ -2238,7 +2253,7 @@ class TripProvider extends ChangeNotifier {
 // ─── Real Promotion Provider ─────────────────────────────────
 class PromotionProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
   List<PromotionModel> _promotions = [];
   StreamSubscription? _promoSub;
 
@@ -2253,7 +2268,8 @@ class PromotionProvider extends ChangeNotifier {
   List<PromotionModel> myPromotions(String uid) =>
       _promotions.where((p) => p.businessId == uid).toList();
 
-  PromotionProvider({this.isMock = false}) {
+  PromotionProvider({this.isMock = false, FirebaseFirestore? db})
+      : _db = db ?? FirebaseFirestore.instance {
     if (isMock) _promotions = List.from(mockPromotions);
   }
 
@@ -2279,7 +2295,7 @@ class PromotionProvider extends ChangeNotifier {
 // ─── Real Search Provider ────────────────────────────────────
 class SearchProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
   List<UserModel> _userResults = [];
   List<EventModel> _eventResults = [];
   List<GroupModel> _groupResults = [];
@@ -2292,7 +2308,8 @@ class SearchProvider extends ChangeNotifier {
   bool get loading => _loading;
   String get query => _query;
 
-  SearchProvider({this.isMock = false});
+  SearchProvider({this.isMock = false, FirebaseFirestore? db})
+      : _db = db ?? FirebaseFirestore.instance;
 
   void updateAuth(AuthProvider auth) {}
 
@@ -2341,7 +2358,7 @@ class SearchProvider extends ChangeNotifier {
 // ─── Real SafeCheck Provider ─────────────────────────────────
 class SafeCheckProvider extends ChangeNotifier {
   final bool isMock;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
   List<SafeCheckModel> _checkIns = [];
   SafeCheckModel? _myLatestCheckIn;
   bool _loading = false;
@@ -2351,7 +2368,8 @@ class SafeCheckProvider extends ChangeNotifier {
   bool get loading => _loading;
   List<SafeCheckModel> get activeCheckIns => _checkIns.where((c) => c.isActive).toList();
 
-  SafeCheckProvider({this.isMock = false}) {
+  SafeCheckProvider({this.isMock = false, FirebaseFirestore? db})
+      : _db = db ?? FirebaseFirestore.instance {
     if (isMock) _checkIns = List.from(mockSafeChecks);
   }
 

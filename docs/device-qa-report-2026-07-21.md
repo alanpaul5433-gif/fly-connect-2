@@ -258,6 +258,20 @@ Worse, it couldn't be fixed by just reading `UserProvider` instead: **`UserProvi
 
 **Coverage — the one fix this session without a dedicated test, stated plainly.** `_PostCard` is private and `FeedTab` needs five mocked providers plus network-image cards with async `isLiked` to pump — the same provider-DI wall flagged throughout. `ValueKey`-follows-identity is a Flutter framework guarantee (covered by Flutter's own tests), so a widget test here would largely assert the framework. `flutter analyze` is clean and all 462 tests still pass (no regression). On-device repro (like a post, create another to prepend, confirm the heart stays put) is **pending** — the OnePlus disconnected at ~7% battery mid-session.
 
+### Infrastructure. Provider dependency injection — ✅ DONE 2026-07-21
+`real_providers.dart` (all 12 providers), `test/providers/*_di_test.dart`
+
+Every provider hard-coded `FirebaseFirestore.instance` / `FirebaseAuth.instance` as field initializers, so their **wiring** — the actual queries and client-side filtering — could only ever be "verified by reading". That caveat trailed H10, H13, H15, H18, H19, H9 and H24. It was also the named **root cause of H17** (`UserProvider.updateAuth` clobbering fresh state).
+
+**Change:** all 12 providers now take optional `FirebaseFirestore? db` / `FirebaseAuth? auth` constructor params that **default to the live singletons** (`db ?? FirebaseFirestore.instance`). Every existing call site — `main.dart`, `main_mock.dart` — is untouched and behaves identically; this is a pure enabling change, and the full suite proves no regression.
+
+**Gaps it closed** — tests that run the real provider code path (`isMock: false`) against `FakeFirebaseFirestore` + `MockFirebaseAuth`, both already dev dependencies:
+- `post_provider_di_test.dart` (4) — feed **block-filtering both directions** and live in-memory removal on `blockUser` (H10 wiring, not just `withoutBlocked`).
+- `match_provider_di_test.dart` (7) — `loadCandidates` end to end: excludes blocked (both directions) and already-acted-on, keeps an incoming pending like, drops business accounts (H14/H15 wiring).
+- `safe_check_provider_di_test.dart` (8) — the **multi-branch merge** the H18 fix explicitly couldn't test: per-branch subscriptions, `verified` gated on the reader, `friends` gated on `visibleTo`, own check-ins always shown, dedupe across overlapping branches, newest-first sort.
+
+**+19 provider tests; 481 Dart total.** The remaining provider methods can now be tested the same way incrementally; this established the pattern and covered the three highest-value gaps.
+
 ## Missing components
 
 | # | What | Evidence |
