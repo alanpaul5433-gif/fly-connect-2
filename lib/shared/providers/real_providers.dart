@@ -2198,6 +2198,20 @@ class TripProvider extends ChangeNotifier {
     }
   }
 
+  /// Another user's trips, newest first — for viewing their passport read-only
+  /// (H9). The signed-in user's own passport keeps using the live [trips]
+  /// stream + edit controls; this is the foreign, read-only path.
+  Stream<List<TripModel>> watchUserTrips(String userId) {
+    if (isMock) {
+      return Stream.value(mockTrips.where((t) => t.userId == userId).toList());
+    }
+    return _db.collection('trips')
+        .where('userId', isEqualTo: userId)
+        .orderBy('startDate', descending: true)
+        .snapshots()
+        .map((s) => s.docs.map((d) => TripModel.fromFirestore(d)).toList());
+  }
+
   Future<void> addTrip(TripModel trip) async {
     if (isMock) { _trips.insert(0, trip); notifyListeners(); return; }
     await _db.collection('trips').doc(trip.id).set(trip.toFirestore());

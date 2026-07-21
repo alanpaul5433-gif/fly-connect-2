@@ -100,7 +100,7 @@ Play has required in-app account deletion since May 2024; the App Store requires
 | H6 **[LIVE]** | `post_details_screen.dart:269-270` | Options sheet **"Share"** and **"Copy link"** are `onTap: () => Navigator.pop(context)`. Tapped Copy link — sheet closed, no clipboard write, no feedback. `_sharePost` exists at `:26` but is only wired to the toolbar icon. |
 | H7 **[LIVE]** | `profile_screen.dart:745` | Profile header says **"47 Posts"** while the grid below says **"No posts yet"** — the grid filters the newest 25 *global* posts by `authorId` instead of querying the user's posts. |
 | H8 **[LIVE]** | `chat_screen.dart:245`, `conversation_screen.dart:273` | **Presence is fake.** A green "online" dot on every tile and a hardcoded `'Online'` in the header — shown even for a *group* chat. No presence data is read anywhere. |
-| H9 **[CODE]** | `trips_screen.dart` | `/passport/:userId` passes `userId` in, and `widget.userId` is **never referenced** (grep: 0 hits in 273 lines). Opening someone else's passport shows **your own trips**, titled "My Trips", with a live Add button and per-row Delete. |
+| H9 ✅ **FIXED** | `trips_screen.dart` | `/passport/:userId` passes `userId` in, and `widget.userId` is **never referenced** (grep: 0 hits in 273 lines). Opening someone else's passport shows **your own trips**, titled "My Trips", with a live Add button and per-row Delete. See below. |
 | H10 ✅ **FIXED** | `real_providers.dart:1189` | `blockUser` writes `users/{me}/blocked/{uid}`, and **nothing reads it** — not the feed, not match candidates. User sees "You will not see their content"; their posts are still there on the next scroll. See below. |
 | H11 ✅ **FIXED** | `conversation_screen.dart:181`, `open_chat.dart:47` | Block falls back to `otherUid ?? chatId`, and `OpenChat.withUser` never passes `otherUid`. Blocking from a match/profile chat writes `blocked/{chatDocId}` — **a document id that is not a user**. Nothing is blocked. Report has the identical bug at `:225`. See below. |
 | H12 **[CODE]** | `home_screen.dart:198` | `_PostCard` is stateful with per-post state set once in `initState`, built **with no `key`**. The feed prepends new posts → like/save state and counts shift onto the wrong cards and never correct themselves. |
@@ -197,6 +197,17 @@ Both new queries are equality-only with no `orderBy`, so no composite index is n
 **Backfill:** `scripts/backfill-engagement-post-author.js` (`--dry-run` first) sets `postAuthorId` on pre-existing likes/comments from their parent post's author. **Not** a deploy prerequisite — the rule only grants delete power, so ordering breaks nothing; until it runs, deleting a post with *old* foreign engagement still fails, exactly the original bug for legacy data. Orphaned engagement (post already gone) is left as-is and reported.
 
 **Coverage:** `functions/test/rules/post-deletion.rules.test.ts` (8 tests) — author can delete others' engagement on their own post; owners keep their own delete power; a stranger cannot; being a liker grants nothing over third-party likes. Client wiring verified by reading (DI limitation).
+
+### H9. Another user's passport showed — and deleted — YOUR trips — ✅ FIXED 2026-07-21
+`trips_screen.dart`, `TripProvider`, `passport_ownership.dart`
+
+`/passport/:userId` was opened for other users (from their profile), but `TripsScreen` never read `widget.userId`. `TripProvider.trips` streams only the signed-in user's trips, so a foreign passport showed **your** trips, titled "My Trips", with a live Add button and a per-row Delete — and tapping Delete removed **your own** trip. The `userId` field even had a doc-comment promising a read-only view that was never implemented.
+
+**Fix:**
+- `isOwnPassport(viewerUid, routeUserId)` gates everything: a null route id (bottom-tab entry) or a matching uid is your own; anyone else is read-only; a signed-out viewer never owns a specific-user passport.
+- Own passport keeps the live `TripProvider.trips` stream and edit controls. A foreign one uses a new `watchUserTrips(userId)` stream (the `trips` read rule already allows `isAuth()`, and the `userId + startDate` index already exists). Title becomes "Trips", the Add action and every Delete are gone, and the empty state speaks about them, not you.
+
+**Coverage:** `passport_ownership_test.dart` (5 tests) pins the ownership decision — including the two signed-out edge cases, where it must never grant edit over anyone. The screen wiring is verified by reading (presentation layer) and on device.
 
 ## Missing components
 

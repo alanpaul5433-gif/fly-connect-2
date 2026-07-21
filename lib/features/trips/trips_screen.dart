@@ -8,6 +8,7 @@ import '../../shared/models/models.dart';
 import '../../shared/widgets/shared_widgets.dart';
 import '../../shared/widgets/skeleton.dart';
 import '../../shared/widgets/confirm_dialog.dart';
+import 'passport_ownership.dart';
 
 class TripsScreen extends StatefulWidget {
   /// Optional: if non-null and different from the current user's uid,
@@ -48,41 +49,60 @@ class _TripsScreenState extends State<TripsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final viewerUid = context.watch<AuthProvider>().currentUser?.uid;
+    final isSelf = isOwnPassport(viewerUid: viewerUid, routeUserId: widget.userId);
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white, elevation: 0,
-        title: const Text('My Trips', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        // H9: only "My Trips" when it IS mine. A foreign passport is read-only.
+        title: Text(isSelf ? 'My Trips' : 'Trips',
+          style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
         actions: [
-          IconButton(icon: const Icon(Icons.add, color: Colors.black),
-            onPressed: () => _showAddTrip(context)),
+          if (isSelf)
+            IconButton(icon: const Icon(Icons.add, color: Colors.black),
+              onPressed: () => _showAddTrip(context)),
         ],
       ),
-      body: Consumer<TripProvider>(
-        builder: (context, provider, _) {
-          final trips = provider.trips;
-          if (trips.isNotEmpty && !_initialLoadComplete) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) setState(() => _initialLoadComplete = true);
-            });
-          }
-          if (trips.isEmpty) {
-            if (!_initialLoadComplete) return const _TripsSkeleton();
-            return _emptyState(context);
-          }
-          return CustomScrollView(slivers: [
-            SliverToBoxAdapter(child: _passportSection(trips)),
-            SliverPadding(
-              padding: const EdgeInsets.all(16),
-              sliver: SliverList(delegate: SliverChildBuilderDelegate(
-                (context, i) => _tripCard(context, trips[i], provider),
-                childCount: trips.length,
-              )),
-            ),
-          ]);
-        },
-      ),
+      // Own passport: the live TripProvider stream + edit controls. Someone
+      // else's: a read-only stream of THEIR trips (H9 — this used to ignore
+      // widget.userId entirely and show the viewer's own trips, editable).
+      body: isSelf
+        ? Consumer<TripProvider>(
+            builder: (context, provider, _) =>
+              _tripsBody(provider.trips, readOnly: false, provider: provider))
+        : StreamBuilder<List<TripModel>>(
+            stream: context.read<TripProvider>().watchUserTrips(widget.userId!),
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const _TripsSkeleton();
+              }
+              return _tripsBody(snap.data ?? const [], readOnly: true, provider: null);
+            }),
     );
+  }
+
+  Widget _tripsBody(List<TripModel> trips,
+      {required bool readOnly, required TripProvider? provider}) {
+    if (trips.isNotEmpty && !_initialLoadComplete) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _initialLoadComplete = true);
+      });
+    }
+    if (trips.isEmpty) {
+      if (!readOnly && !_initialLoadComplete) return const _TripsSkeleton();
+      return readOnly ? _emptyForeignState() : _emptyState(context);
+    }
+    return CustomScrollView(slivers: [
+      SliverToBoxAdapter(child: _passportSection(trips)),
+      SliverPadding(
+        padding: const EdgeInsets.all(16),
+        sliver: SliverList(delegate: SliverChildBuilderDelegate(
+          (context, i) => _tripCard(context, trips[i], provider, readOnly: readOnly),
+          childCount: trips.length,
+        )),
+      ),
+    ]);
   }
 
   Widget _passportSection(List<TripModel> trips) {
@@ -122,7 +142,8 @@ class _TripsScreenState extends State<TripsScreen> {
     );
   }
 
-  Widget _tripCard(BuildContext context, TripModel trip, TripProvider provider) {
+  Widget _tripCard(BuildContext context, TripModel trip, TripProvider? provider,
+      {required bool readOnly}) {
     final country = _countries.firstWhere((c) => c['code'] == trip.countryCode,
       orElse: () => {'code': trip.countryCode, 'name': trip.destination, 'flag': '✈️'});
     return Container(
@@ -140,7 +161,9 @@ class _TripsScreenState extends State<TripsScreen> {
           Text(country['name'] ?? '', style: const TextStyle(fontSize: 12, color: Colors.grey)),
           Text(DateFormat('MMM d, yyyy').format(trip.startDate), style: const TextStyle(fontSize: 12)),
         ]),
-        trailing: IconButton(
+        // H9: Delete only on your OWN passport. Previously every card carried a
+        // live Delete even when viewing someone else — and it deleted YOUR trip.
+        trailing: (readOnly || provider == null) ? null : IconButton(
           icon: const Icon(Icons.delete_outline, color: Colors.red),
           onPressed: () async {
             final messenger = ScaffoldMessenger.of(context);
@@ -165,6 +188,13 @@ class _TripsScreenState extends State<TripsScreen> {
       ),
     );
   }
+
+  // Read-only variant: no "Add Trip" CTA, and the copy is about them, not you.
+  Widget _emptyForeignState() => const EmptyState(
+        icon: Icons.flight_takeoff_outlined,
+        title: 'No trips yet',
+        subtitle: 'This traveller hasn\'t added any passport stamps yet.',
+      );
 
   Widget _emptyState(BuildContext context) => EmptyState(
         icon: Icons.flight_takeoff_outlined,
