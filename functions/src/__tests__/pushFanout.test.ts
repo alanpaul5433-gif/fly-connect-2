@@ -2,13 +2,44 @@ import functionsTest from 'firebase-functions-test';
 
 jest.mock('../lib/fcm', () => ({
   getFcmToken: jest.fn(),
+  getUserSettings: jest.fn(),
   sendPush: jest.fn(),
 }));
 
-import { getFcmToken, sendPush } from '../lib/fcm';
-import { onNotificationCreated } from '../pushFanout';
+import { getFcmToken, getUserSettings, sendPush } from '../lib/fcm';
+import { onNotificationCreated, isPushAllowed, pushSettingKeyForType } from '../pushFanout';
 
 const test = functionsTest();
+
+describe('push preference gating (H16 — the six settings toggles)', () => {
+  it('maps each notification type to its settings toggle', () => {
+    expect(pushSettingKeyForType('comment')).toBe('pushComments');
+    expect(pushSettingKeyForType('match')).toBe('pushMatches');
+    expect(pushSettingKeyForType('message')).toBe('pushMessages');
+    expect(pushSettingKeyForType('event')).toBe('pushEvents');
+    expect(pushSettingKeyForType('admin_safecheck')).toBe('pushSafeCheck');
+    expect(pushSettingKeyForType('like')).toBe('pushLikes');
+  });
+
+  it('types with no user toggle are always allowed', () => {
+    // follow / group / promotion / admin have no settings switch.
+    expect(pushSettingKeyForType('admin')).toBeNull();
+    expect(isPushAllowed('admin', { pushComments: false })).toBe(true);
+    expect(isPushAllowed('promotion', {})).toBe(true);
+  });
+
+  it('a toggle explicitly false blocks that type', () => {
+    expect(isPushAllowed('message', { pushMessages: false })).toBe(false);
+    expect(isPushAllowed('comment', { pushComments: false })).toBe(false);
+  });
+
+  it('missing or true means allowed (default on)', () => {
+    expect(isPushAllowed('message', {})).toBe(true);
+    expect(isPushAllowed('message', { pushMessages: true })).toBe(true);
+    // A different toggle being off does not affect this type.
+    expect(isPushAllowed('message', { pushComments: false })).toBe(true);
+  });
+});
 
 describe('onNotificationCreated (Stage 2 push fan-out)', () => {
   const wrapped = test.wrap(onNotificationCreated);
@@ -16,6 +47,25 @@ describe('onNotificationCreated (Stage 2 push fan-out)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (getFcmToken as jest.Mock).mockResolvedValue('a-token');
+    (getUserSettings as jest.Mock).mockResolvedValue({}); // default: all push on
+  });
+
+  it('does not send when the matching push toggle is off (H16)', async () => {
+    (getUserSettings as jest.Mock).mockResolvedValue({ pushComments: false });
+    await wrapped({
+      params: { id: 'comment_c1' },
+      data: { userId: 'author-1', type: 'comment', title: 'New comment', body: 'x', postId: 'post-1' },
+    });
+    expect(sendPush).not.toHaveBeenCalled();
+  });
+
+  it('still sends when a DIFFERENT toggle is off', async () => {
+    (getUserSettings as jest.Mock).mockResolvedValue({ pushMessages: false });
+    await wrapped({
+      params: { id: 'comment_c1' },
+      data: { userId: 'author-1', type: 'comment', title: 'New comment', body: 'x', postId: 'post-1' },
+    });
+    expect(sendPush).toHaveBeenCalled();
   });
 
   afterAll(() => test.cleanup());

@@ -99,7 +99,7 @@ Play has required in-app account deletion since May 2024; the App Store requires
 | H5 **[LIVE]** | `events_screen.dart:143` | `SectionHeader(actionLabel: 'See All')` passes no `onAction`. **"See All →" is a dead control** — tapped, nothing changed but the clock. |
 | H6 **[LIVE]** | `post_details_screen.dart:269-270` | Options sheet **"Share"** and **"Copy link"** are `onTap: () => Navigator.pop(context)`. Tapped Copy link — sheet closed, no clipboard write, no feedback. `_sharePost` exists at `:26` but is only wired to the toolbar icon. |
 | H7 **[LIVE]** | `profile_screen.dart:745` | Profile header says **"47 Posts"** while the grid below says **"No posts yet"** — the grid filters the newest 25 *global* posts by `authorId` instead of querying the user's posts. |
-| H8 **[LIVE]** | `chat_screen.dart:245`, `conversation_screen.dart:273` | **Presence is fake.** A green "online" dot on every tile and a hardcoded `'Online'` in the header — shown even for a *group* chat. No presence data is read anywhere. |
+| H8 ✅ **FIXED** | `chat_screen.dart:245`, `conversation_screen.dart:273` | **Presence is fake.** A green "online" dot on every tile and a hardcoded `'Online'` in the header — shown even for a *group* chat. No presence data is read anywhere. |
 | H9 ✅ **FIXED** | `trips_screen.dart` | `/passport/:userId` passes `userId` in, and `widget.userId` is **never referenced** (grep: 0 hits in 273 lines). Opening someone else's passport shows **your own trips**, titled "My Trips", with a live Add button and per-row Delete. See below. |
 | H10 ✅ **FIXED** | `real_providers.dart:1189` | `blockUser` writes `users/{me}/blocked/{uid}`, and **nothing reads it** — not the feed, not match candidates. User sees "You will not see their content"; their posts are still there on the next scroll. See below. |
 | H11 ✅ **FIXED** | `conversation_screen.dart:181`, `open_chat.dart:47` | Block falls back to `otherUid ?? chatId`, and `OpenChat.withUser` never passes `otherUid`. Blocking from a match/profile chat writes `blocked/{chatDocId}` — **a document id that is not a user**. Nothing is blocked. Report has the identical bug at `:225`. See below. |
@@ -107,16 +107,16 @@ Play has required in-app account deletion since May 2024; the App Store requires
 | H13 ✅ **FIXED** | `real_providers.dart:1101` | `deletePost` batches deletion of all comments + likes, but rules only allow their owners to delete them (`firestore.rules:118,124`). One denial fails the whole commit → **a post anyone else liked or commented on can never be deleted**. See below. |
 | H14 ✅ **FIXED** | `real_providers.dart:1851` | `loadCandidates` has no try/catch around two Firestore reads. Offline or `permission-denied` leaves `_loading` stuck true → **Match tab is a permanent spinner** with no error and no retry. See below. |
 | H15 ✅ **FIXED** | `real_providers.dart:1870` | Candidate query excludes neither already-matched/passed users nor blocked users. **Passed profiles come straight back**, and `passUser` `add()`s a fresh doc per pass (duplicate rows forever). See below. |
-| H16 **[CODE]** | `settings_screen.dart:130-141` | All six push toggles are persisted to `users/{uid}.settings` and **read by nobody** — not by any Dart file, not by `functions/src/pushFanout.ts`. Turning off "Messages" changes nothing. |
+| H16 ✅ **FIXED** | `settings_screen.dart:130-141` | All six push toggles are persisted to `users/{uid}.settings` and **read by nobody** — not by any Dart file, not by `functions/src/pushFanout.ts`. Turning off "Messages" changes nothing. |
 | H17 ✅ **FIXED** | `nearby_users_screen.dart:135` | Location privacy reads `AuthProvider.currentUser.settings`, but Settings writes via `UserProvider.updateProfile`. `AuthProvider` never refreshes → **turning off location sharing has no effect until app restart**; coordinates keep uploading. See below. |
 | H18 ✅ **FIXED** | `firestore.rules:296` | SafeCheck Visibility (Friends / Verified only) was **client-side only**. `safeChecks` was `allow read: if isAuth()` — any signed-in user could read every check-in's status, message, city and lat/lng. See below. |
 | H19 ✅ **FIXED** | `analytics_screen.dart:62`, `dashboard_screen.dart:15` | Business analytics iterate the **global** promotions/events collections, not `myPromotions(uid)`. **Business A sees Business B's** deal titles, views, saves and redemptions. See below. |
-| H20 **[CODE]** | `analytics_screen.dart:41`, `business_profile_screen.dart:119` | Growth `+12%`, Reach `8,420`, Engagement `4.2%`, Followers `2,840`, Events `3` are **hardcoded literals** presented as real metrics. Only the bar chart carries a "Demo chart" badge. |
-| H21 **[CODE]** | `promotion_detail_screen.dart:120` | "Show this QR code at the venue" is a 6×6 `GridView` coloured by `i % 3 == 0`. **It is not a QR code** and encodes nothing. Redemption counters are never incremented anywhere. |
+| H20 ✅ **FIXED** | `analytics_screen.dart:41`, `business_profile_screen.dart:119` | Growth `+12%`, Reach `8,420`, Engagement `4.2%`, Followers `2,840`, Events `3` are **hardcoded literals** presented as real metrics. Only the bar chart carries a "Demo chart" badge. |
+| H21 ✅ **FIXED** | `promotion_detail_screen.dart:120` | "Show this QR code at the venue" is a 6×6 `GridView` coloured by `i % 3 == 0`. **It is not a QR code** and encodes nothing. Redemption counters are never incremented anywhere. |
 | H22 **[CODE]** | `group_details_screen.dart:461` | Members tab renders `Text('Member ${i+1}')` with the raw uid as subtitle. **Real names are never fetched**, though `GroupProvider.fetchMembers` exists and the business screen uses it. |
 | H23 **[CODE]** | `group_details_screen.dart:470`, `event_management_screen.dart:476` | Member "Message" pushes a **fabricated chat id** (`${uid}_dm`, `evt_{id}_{uid}`), bypassing `getOrCreateDm`. Messages land in a chat the recipient isn't a participant of — they never arrive. |
 | H24 ✅ **FIXED** | `real_providers.dart:1390`, `:1484` | `watchMessages` has **no limit and no pagination**; `markMessagesRead` `get()`s every unread message and batches them — >500 unread exceeds the batch limit and throws uncaught from `initState`. See below. |
-| H25 **[CODE]** | `conversation_screen.dart:378` | `setTyping` fires on **every keystroke** (one Firestore write per character, no debounce) and is **never cleared** on send or dispose — the other party sees "typing…" forever. |
+| H25 ✅ **FIXED** | `conversation_screen.dart:378` | `setTyping` fires on **every keystroke** (one Firestore write per character, no debounce) and is **never cleared** on send or dispose — the other party sees "typing…" forever. |
 
 ---
 
@@ -271,6 +271,18 @@ Every provider hard-coded `FirebaseFirestore.instance` / `FirebaseAuth.instance`
 - `safe_check_provider_di_test.dart` (8) — the **multi-branch merge** the H18 fix explicitly couldn't test: per-branch subscriptions, `verified` gated on the reader, `friends` gated on `visibleTo`, own check-ins always shown, dedupe across overlapping branches, newest-first sort.
 
 **+19 provider tests; 481 Dart total.** The remaining provider methods can now be tested the same way incrementally; this established the pattern and covered the three highest-value gaps.
+
+### Honesty cluster (H8, H16, H20, H21, H25) — ✅ FIXED 2026-07-21
+
+None of these were crashes, leaks, or data-integrity bugs — they made the app *look* more functional than it is. Grouped because the theme is the same: a UI element claiming something the backend never backed.
+
+- **H25 — typing indicator.** `setTyping` fired one Firestore write per keystroke and was never set false on send or dispose, so the other party saw "typing…" forever. New `TypingReporter` writes only on idle↔typing transitions (one `true` per burst) and `stop()` runs on send (text + image) and dispose. 7 tests.
+- **H8 — fake presence.** A green "online" dot was hardcoded on every chat tile and the header hardcoded 'Online' (even for groups), with no presence system — `lastSeen` is only stamped at login, useless as a live signal. Removed both rather than faking them; the header now shows the real 'typing…' signal or nothing. Real presence (onDisconnect heartbeats) is a follow-up.
+- **H20 — fabricated analytics.** Growth/Reach/Engagement were hardcoded literals (`+12%`, `8,420`, `4.2%`) keyed off the range dropdown and presented as measured data. Replaced with four real, tenant-scoped values (Followers, Deals, Views, Redeemed) from the business's own promotions. Metrics needing historical/impression data we don't collect were dropped, not faked.
+- **H21 — fake QR.** The redemption "QR" was a 6×6 `GridView` coloured by `i % 3 == 0` — it encoded nothing and couldn't be scanned. Now a real QR (`qr_flutter`, already a dependency) of a stable redemption deep link tied to the promotion id.
+- **H16 — dead push toggles.** The six Settings toggles were written to `users/{uid}.settings` and read by nobody. `pushFanout.ts` now reads the recipient's settings and skips a send when the toggle for that notification type is explicitly false; types with no toggle (follow/group/promotion/admin) always send. 6 function tests.
+
+**Coverage:** `typing_reporter_test` (7), `business_scope_test` extended (aggregates + `redemptionCode`), `pushFanout.test` extended (6). **494 Dart, 17 function, 56 rules.** Shipped on branch `fix/honesty-cluster` (separate from PR #1).
 
 ## Missing components
 

@@ -9,6 +9,7 @@ import '../../shared/providers/post_provider.dart';
 import '../../shared/models/models.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../shared/widgets/cached_image.dart';
+import 'typing_reporter.dart';
 
 class ConversationScreen extends StatefulWidget {
   final String chatId;
@@ -24,17 +25,23 @@ class _ConversationScreenState extends State<ConversationScreen> {
   final TextEditingController _ctrl = TextEditingController();
   final ScrollController _scroll = ScrollController();
   bool _sending = false;
+  // H25: writes typing state only on idle↔typing transitions (not per
+  // keystroke) and is force-stopped on send and dispose.
+  late final TypingReporter _typing;
 
   @override
   void initState() {
     super.initState();
     final chatProvider = context.read<ChatProvider>();
+    // Captured here so dispose() doesn't touch a disposed BuildContext.
+    _typing = TypingReporter((t) => chatProvider.setTyping(widget.chatId, t));
     chatProvider.markAsRead(widget.chatId);
     chatProvider.markMessagesRead(widget.chatId);
   }
 
   @override
   void dispose() {
+    _typing.stop(); // clear "typing…" when leaving the screen (H25)
     _ctrl.dispose();
     _scroll.dispose();
     super.dispose();
@@ -44,6 +51,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
     final text = _ctrl.text.trim();
     if (text.isEmpty) return;
     _ctrl.clear();
+    _typing.stop(); // sending ends the typing burst (H25)
     setState(() => _sending = true);
     try {
       await context.read<ChatProvider>().sendMessage(widget.chatId, text);
@@ -86,6 +94,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
       }
       final caption = _ctrl.text.trim();
       _ctrl.clear();
+      _typing.stop(); // sending ends the typing burst (H25)
       await context
           .read<ChatProvider>()
           .sendMessage(widget.chatId, caption, mediaUrl: url, mediaType: 'image');
@@ -272,17 +281,19 @@ class _ConversationScreenState extends State<ConversationScreen> {
           const SizedBox(width: 10),
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(widget.otherName, style: const TextStyle(color: Colors.black, fontSize: 15, fontWeight: FontWeight.w600)),
+            // H8: the status line hardcoded 'Online' (even for a group) with no
+            // presence data behind it. Now it shows the real 'typing…' signal
+            // when present and nothing otherwise — never a fabricated status.
             StreamBuilder<Map<String, bool>>(
               stream: context.read<ChatProvider>().watchTyping(widget.chatId),
               builder: (_, snap) {
                 final typing = snap.data?.entries
                     .where((e) => e.key != myUid && e.value).isNotEmpty ?? false;
-                // Contrast: `AppColors.primary` (neon yellow-green) on white
-                // is 1.7:1 — fails WCAG AA. `AppColors.online` is a darker
-                // green that passes the 3:1 large-text contrast bar and
-                // matches the rest of the app's status indicators.
-                return Text(typing ? 'typing...' : 'Online',
-                  style: const TextStyle(
+                if (!typing) return const SizedBox.shrink();
+                // Contrast: `AppColors.online` is a darker green that passes the
+                // 3:1 large-text bar (AppColors.primary on white is 1.7:1).
+                return const Text('typing...',
+                  style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                       color: AppColors.online));
@@ -386,7 +397,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
             ),
             Expanded(child: TextField(
               controller: _ctrl,
-              onChanged: (v) => context.read<ChatProvider>().setTyping(widget.chatId, v.isNotEmpty),
+              onChanged: (v) => _typing.onInput(hasText: v.trim().isNotEmpty),
               decoration: InputDecoration(
                 hintText: 'Message...',
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),

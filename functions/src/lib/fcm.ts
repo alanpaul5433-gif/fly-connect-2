@@ -15,6 +15,22 @@ export async function getFcmToken(userId: string): Promise<string | null> {
   return typeof token === 'string' && token.trim() ? token : null;
 }
 
+/**
+ * The user's notification preferences from `users/{userId}.settings` (H16).
+ * Returns `{}` when absent so callers apply defaults (push on). Failures are
+ * swallowed to `{}` — a settings read error must not silently drop a push the
+ * user never opted out of.
+ */
+export async function getUserSettings(userId: string): Promise<Record<string, unknown>> {
+  try {
+    const snap = await db.collection('users').doc(userId).get();
+    const settings = snap.data()?.settings;
+    return settings && typeof settings === 'object' ? (settings as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
 /** Sends one push; catches and logs send failures (invalid/expired token, etc.) rather than throwing. */
 export async function sendPush(
   token: string,
