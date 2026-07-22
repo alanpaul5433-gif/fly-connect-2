@@ -240,11 +240,10 @@ class _ChatTile extends StatelessWidget {
           fallback: (isGroup && chat.groupPhotoUrl == null)
             ? const Icon(Icons.group, color: AppColors.primary)
             : null),
-        Positioned(bottom: 0, right: 0,
-          child: Container(width: 12, height: 12,
-            decoration: BoxDecoration(
-              color: AppColors.online, shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2)))),
+        // H8: the green "online" dot was hardcoded on every tile — the app has
+        // no presence system (lastSeen is only stamped at login, not a live
+        // heartbeat), so claiming everyone is online was a fabrication. Removed
+        // rather than faked. A real presence system is a documented follow-up.
       ]),
       title: Text(name, style: AppTextStyles.labelMedium),
       subtitle: Text(chat.lastMessage ?? 'No messages yet',
