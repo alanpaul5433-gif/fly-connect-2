@@ -8,3 +8,5 @@ export { onEventRsvpCreated } from './producers/rsvps';
 export { onChatMessageCreated } from './producers/messages';
 export { onPromotionApproved, onEventApproved, onGroupCreated } from './producers/businessContent';
 export { onNotificationCreated } from './pushFanout';
+// H20: daily follower-count snapshots so analytics can show real growth.
+export { snapshotBusinessStats } from './dailyStats';

@@ -141,6 +141,24 @@ void main() {
     });
   });
 
+  group('growthFraction (H20 — real follower growth from a snapshot)', () {
+    test('is the fractional change from baseline to current', () {
+      expect(growthFraction(current: 110, baseline: 100), closeTo(0.10, 1e-9));
+    });
+
+    test('is negative when followers dropped', () {
+      expect(growthFraction(current: 80, baseline: 100), closeTo(-0.20, 1e-9));
+    });
+
+    test('is null with no baseline yet (history still accruing)', () {
+      expect(growthFraction(current: 100, baseline: null), isNull);
+    });
+
+    test('is null when baseline is zero (no divide-by-zero / infinite %)', () {
+      expect(growthFraction(current: 50, baseline: 0), isNull);
+    });
+  });
+
   group('redemptionCode (H21 — a real, scannable QR payload)', () {
     test('encodes the promotion id in a stable deep link', () {
       expect(redemptionCode('promo_42'),

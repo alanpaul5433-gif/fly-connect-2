@@ -47,6 +47,15 @@ double saveRate(List<PromotionModel> promos) {
   return views == 0 ? 0 : saves / views;
 }
 
+/// Real follower growth (H20): the fractional change from a [baseline]
+/// snapshot to [current]. Null when there's no usable baseline yet — the UI
+/// shows "building history…", never a fabricated number. Mirrors the Cloud
+/// Function's growthFraction so client and backend agree.
+double? growthFraction({required int current, required int? baseline}) {
+  if (baseline == null || baseline <= 0) return null;
+  return (current - baseline) / baseline;
+}
+
 /// The scannable payload behind a promotion's redemption QR (H21). A stable
 /// deep link tied to the promotion id, so a venue scan resolves to exactly one
 /// deal — unlike the old decorative grid, which encoded nothing.

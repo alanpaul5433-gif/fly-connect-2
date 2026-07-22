@@ -118,6 +118,13 @@ service cloud.firestore {
         // Only the user may see or modify their own bookmarks.
         allow read, write: if isOwner(userId);
       }
+      match /dailyStats/{date} {
+        // H20: daily follower snapshots for the business's own growth chart.
+        // Written only by the scheduled Cloud Function (admin SDK bypasses
+        // rules); the owner reads their own history. No client writes.
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if false;
+      }
       match /trips/{tripId} {
         allow read: if isAuth();
         allow write: if isOwner(userId);
