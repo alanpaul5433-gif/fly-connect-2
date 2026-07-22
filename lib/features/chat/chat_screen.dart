@@ -12,6 +12,7 @@ import '../../shared/widgets/skeleton.dart';
 import '../../shared/widgets/shared_widgets.dart';
 import '../../shared/widgets/inline_error_banner.dart';
 import '../../shared/widgets/cached_image.dart';
+import '../../shared/services/presence.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -218,6 +219,14 @@ class _ChatListSkeleton extends StatelessWidget {
   }
 }
 
+/// One shared PresenceService, created lazily and only in real mode (mock mode
+/// has no RTDB, so constructing one would touch FirebaseDatabase.instance).
+PresenceService? _sharedPresence;
+PresenceService? _presenceIfReal(BuildContext context) {
+  if (context.read<AuthProvider>().isMock) return null;
+  return _sharedPresence ??= PresenceService();
+}
+
 class _ChatTile extends StatelessWidget {
   final ChatModel chat;
   final String currentUid;
@@ -229,6 +238,7 @@ class _ChatTile extends StatelessWidget {
     final isGroup = chat.type == 'group';
     final name = chat.displayNameFor(currentUid);
     final otherUid = chat.otherUidFor(currentUid);
+    final presence = _presenceIfReal(context);
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -240,10 +250,20 @@ class _ChatTile extends StatelessWidget {
           fallback: (isGroup && chat.groupPhotoUrl == null)
             ? const Icon(Icons.group, color: AppColors.primary)
             : null),
-        // H8: the green "online" dot was hardcoded on every tile — the app has
-        // no presence system (lastSeen is only stamped at login, not a live
-        // heartbeat), so claiming everyone is online was a fabrication. Removed
-        // rather than faked. A real presence system is a documented follow-up.
+        // H8: the dot was hardcoded on every tile with no presence behind it.
+        // Now it appears only when the other participant is genuinely online
+        // per RTDB (DMs only; nothing in mock mode, where presence is null).
+        if (!isGroup && otherUid != null && presence != null)
+          Positioned(bottom: 0, right: 0,
+            child: StreamBuilder<Presence>(
+              stream: presence.watch(otherUid),
+              builder: (_, snap) {
+                if (snap.data?.online != true) return const SizedBox.shrink();
+                return Container(width: 12, height: 12,
+                  decoration: BoxDecoration(
+                    color: AppColors.online, shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2)));
+              })),
       ]),
       title: Text(name, style: AppTextStyles.labelMedium),
       subtitle: Text(chat.lastMessage ?? 'No messages yet',

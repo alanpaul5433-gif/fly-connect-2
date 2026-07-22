@@ -36,6 +36,8 @@ void main() {
     chatProvider = _MockChatProvider();
     authProvider = _MockAuthProvider();
     when(() => authProvider.currentUser).thenReturn(buildUser(uid: 'user-a'));
+    // Mock mode → the screen skips RTDB presence (no live database in tests).
+    when(() => authProvider.isMock).thenReturn(true);
     when(() => chatProvider.markAsRead(any())).thenAnswer((_) async {});
     when(() => chatProvider.markMessagesRead(any())).thenAnswer((_) async {});
     when(() => chatProvider.watchTyping(any())).thenAnswer((_) => Stream.value(const {}));
