@@ -111,6 +111,11 @@ void main() {
     when(() => eventProvider.events).thenReturn([own]);
 
     await _pumpScreen(tester, authProvider: authProvider, eventProvider: eventProvider);
+    // Scroll the card into view first — the analytics screen scrolls, and the
+    // event list sits below the metrics/rates/chart, so a real user reaches it
+    // by scrolling. (Tapping an off-screen widget silently misses.)
+    await tester.ensureVisible(find.text('Own Event'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Own Event'));
     await tester.pumpAndSettle();
 

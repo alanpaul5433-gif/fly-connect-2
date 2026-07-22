@@ -104,6 +104,19 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             Expanded(child: _MetricCard(value: '${totalRedemptions(promotions)}', label: 'Redeemed')),
           ]),
 
+          const SizedBox(height: 10),
+          // H20: real engagement rates derived from data we already collect —
+          // no fabrication, no time-series infra needed.
+          Row(children: [
+            Expanded(child: _RateChip(
+              label: 'Redemption rate',
+              value: '${(redemptionRate(promotions) * 100).toStringAsFixed(1)}%')),
+            const SizedBox(width: 10),
+            Expanded(child: _RateChip(
+              label: 'Save rate',
+              value: '${(saveRate(promotions) * 100).toStringAsFixed(1)}%')),
+          ]),
+
           const SizedBox(height: 24),
 
           Row(children: [
@@ -328,6 +341,23 @@ class _MetricCard extends StatelessWidget {
       const SizedBox(height: 2),
       Text(label, style: AppTextStyles.caption.copyWith(color: Colors.white70),
         textAlign: TextAlign.center),
+    ]),
+  );
+}
+
+/// Compact engagement-rate pill (H20). Lighter than a _MetricCard since a rate
+/// is a derived percentage, not a headline total.
+class _RateChip extends StatelessWidget {
+  final String value, label;
+  const _RateChip({required this.value, required this.label});
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+    decoration: BoxDecoration(
+      color: AppColors.backgroundGrey, borderRadius: BorderRadius.circular(12)),
+    child: Row(children: [
+      Expanded(child: Text(label, style: AppTextStyles.caption)),
+      Text(value, style: AppTextStyles.labelMedium.copyWith(color: AppColors.dark)),
     ]),
   );
 }

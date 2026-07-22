@@ -32,6 +32,21 @@ int totalRedemptions(List<PromotionModel> promos) =>
 int activeDealCount(List<PromotionModel> promos) =>
     promos.where((p) => p.isActive && p.isApproved).length;
 
+/// H20: engagement rates derived from data we already collect — real metrics
+/// to replace the fabricated Growth/Reach/Engagement literals. Guarded against
+/// divide-by-zero so an unseen catalogue reads 0, not NaN.
+
+double redemptionRate(List<PromotionModel> promos) {
+  final views = totalViews(promos);
+  return views == 0 ? 0 : totalRedemptions(promos) / views;
+}
+
+double saveRate(List<PromotionModel> promos) {
+  final views = totalViews(promos);
+  final saves = promos.fold(0, (sum, p) => sum + p.saves);
+  return views == 0 ? 0 : saves / views;
+}
+
 /// The scannable payload behind a promotion's redemption QR (H21). A stable
 /// deep link tied to the promotion id, so a venue scan resolves to exactly one
 /// deal — unlike the old decorative grid, which encoded nothing.

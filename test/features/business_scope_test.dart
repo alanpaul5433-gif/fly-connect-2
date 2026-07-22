@@ -109,6 +109,38 @@ void main() {
     });
   });
 
+  group('engagement rates (H20 — real, derived from existing data)', () {
+    test('redemptionRate is redemptions over views', () {
+      final promos = [
+        promo('p1', me, views: 100, redemptions: 5),
+        promo('p2', me, views: 100, redemptions: 15),
+      ];
+      // 20 redemptions / 200 views = 10%.
+      expect(redemptionRate(promos), closeTo(0.10, 1e-9));
+    });
+
+    test('saveRate is saves over views', () {
+      // promo() seeds saves: 0, so build one with saves via the model directly.
+      final p = PromotionModel(
+        id: 's1', businessId: me, businessName: me, title: 's1', description: '',
+        discountPercent: 10, validFrom: DateTime(2026, 1, 1), validTo: DateTime(2026, 12, 31),
+        maxRedemptions: 100, currentRedemptions: 0, views: 50, saves: 10,
+        isActive: true, isApproved: true);
+      expect(saveRate([p]), closeTo(0.20, 1e-9));
+    });
+
+    test('rates are zero (not NaN) when there are no views', () {
+      final p = promo('p1', me, views: 0, redemptions: 0);
+      expect(redemptionRate([p]), 0);
+      expect(saveRate([p]), 0);
+    });
+
+    test('rates of an empty list are zero', () {
+      expect(redemptionRate(const []), 0);
+      expect(saveRate(const []), 0);
+    });
+  });
+
   group('redemptionCode (H21 — a real, scannable QR payload)', () {
     test('encodes the promotion id in a stable deep link', () {
       expect(redemptionCode('promo_42'),
