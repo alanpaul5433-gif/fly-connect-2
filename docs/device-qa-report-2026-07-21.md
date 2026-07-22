@@ -284,6 +284,18 @@ None of these were crashes, leaks, or data-integrity bugs — they made the app 
 
 **Coverage:** `typing_reporter_test` (7), `business_scope_test` extended (aggregates + `redemptionCode`), `pushFanout.test` extended (6). **494 Dart, 17 function, 56 rules.** Shipped on branch `fix/honesty-cluster` (separate from PR #1).
 
+### H8 & H20 real versions — ✅ SHIPPED 2026-07-21 (branch `feat/presence-and-real-metrics`)
+
+The honesty cluster *removed* the fabrications; this builds the real features behind them.
+
+**H8 — real presence (RTDB).** The canonical Firebase pattern: an `onDisconnect` handler flips `/status/{uid}` to offline server-side when the socket drops, so a force-quit is reflected without client cooperation. `PresenceController` drives online/offline from `.info/connected` + app lifecycle; the conversation header shows real `Online` / `last seen …`, and the chat-list dot returns, lit only when the other user is genuinely online. `database.rules.json` locks writes to the owner. `firebase_database` added (approved). Deploy: `firebase deploy --only database`.
+
+**H20 — real engagement + growth.**
+- *Rates (no infra):* redemption rate and save rate, derived from existing promo data.
+- *Growth (new infra):* `snapshotBusinessStats` (scheduled daily) writes `users/{uid}/dailyStats/{date}` follower snapshots; the analytics screen shows a real "+X% since {date}" from the earliest snapshot, or "building history…" until it accrues. The demo bar chart and its range selector are gone.
+
+**Coverage:** 12 presence tests, 6 dailyStats function tests, 3 dailyStats rules tests, Dart rate/growth tests. **514 Dart · 80 function · 59 rules (6 suites)**, analyze clean, debug APK builds. **New deploy step:** `firebase deploy --only database,functions` (the scheduled function + RTDB rules).
+
 ## Missing components
 
 | # | What | Evidence |
