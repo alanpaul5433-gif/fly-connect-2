@@ -1,6 +1,6 @@
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import * as logger from 'firebase-functions/logger';
-import { getFcmToken, sendPush } from './lib/fcm';
+import { getFcmToken, getUserSettings, sendPush } from './lib/fcm';
 
 /**
  * Push notification payloads render on the lock screen with weaker access
@@ -14,6 +14,34 @@ const GENERIC_PUSH_BODY: Record<string, string> = {
   match: 'You have a new match',
   message: 'New message',
 };
+
+/**
+ * H16: the six push toggles in Settings were written to `users/{uid}.settings`
+ * and read by nobody — turning off "Messages" changed nothing. This maps a
+ * notification `type` to its settings key so the fan-out can honour it.
+ *
+ * Types with no user-facing switch (follow, group, promotion, admin) return
+ * null and are always allowed.
+ */
+export function pushSettingKeyForType(type: string): string | null {
+  switch (type) {
+    case 'like': return 'pushLikes';
+    case 'comment': return 'pushComments';
+    case 'match': return 'pushMatches';
+    case 'message': return 'pushMessages';
+    case 'event': return 'pushEvents';
+    case 'admin_safecheck': return 'pushSafeCheck';
+    default: return null;
+  }
+}
+
+/** Whether a push of [type] is allowed given the user's settings. A toggle is
+ * respected only when explicitly `false`; missing/true defaults to on. */
+export function isPushAllowed(type: string, settings: Record<string, unknown>): boolean {
+  const key = pushSettingKeyForType(type);
+  if (key === null) return true;
+  return settings[key] !== false;
+}
 
 /**
  * Fully-specified in-app `type` → FCM `data.type` lookup table. Not an
@@ -73,6 +101,13 @@ export const onNotificationCreated = onDocumentCreated(
 
     const userId = doc.userId as string | undefined;
     if (!userId) return;
+
+    // H16: honour the recipient's push preference for this notification type.
+    const settings = await getUserSettings(userId);
+    if (!isPushAllowed(doc.type as string, settings)) {
+      logger.info(`push type ${doc.type} disabled by ${userId} — skipping ${event.params.id}`);
+      return;
+    }
 
     const token = await getFcmToken(userId);
     if (!token) {
