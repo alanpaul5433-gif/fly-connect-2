@@ -82,4 +82,41 @@ void main() {
       expect(ownEvents([event('e1', me)], null), isEmpty);
     });
   });
+
+  group('promotion aggregates (H20 — real metrics, not fabricated)', () {
+    final promos = [
+      promo('p1', me, views: 10, redemptions: 2, active: true),
+      promo('p2', me, views: 5, redemptions: 0, active: true),
+      promo('p3', me, views: 100, redemptions: 7, active: false),
+    ];
+
+    test('totalViews sums views across all promotions', () {
+      expect(totalViews(promos), 115);
+    });
+
+    test('totalRedemptions sums redemptions across all promotions', () {
+      expect(totalRedemptions(promos), 9);
+    });
+
+    test('activeDealCount counts only active, approved promotions', () {
+      expect(activeDealCount(promos), 2);
+    });
+
+    test('aggregates of an empty list are zero, not fabricated', () {
+      expect(totalViews(const []), 0);
+      expect(totalRedemptions(const []), 0);
+      expect(activeDealCount(const []), 0);
+    });
+  });
+
+  group('redemptionCode (H21 — a real, scannable QR payload)', () {
+    test('encodes the promotion id in a stable deep link', () {
+      expect(redemptionCode('promo_42'),
+          'https://flyconnect.co/redeem/promo_42');
+    });
+
+    test('different promotions produce different codes', () {
+      expect(redemptionCode('a'), isNot(redemptionCode('b')));
+    });
+  });
 }

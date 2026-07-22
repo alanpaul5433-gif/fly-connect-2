@@ -6,6 +6,8 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../shared/models/models.dart';
 import '../../shared/providers/user_provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'business_scope.dart';
 
 class PromotionDetailScreen extends StatelessWidget {
   final PromotionModel promotion;
@@ -121,17 +123,18 @@ class PromotionDetailScreen extends StatelessWidget {
                         style: TextStyle(color: Colors.white60, fontSize: 12),
                         textAlign: TextAlign.center),
                       const SizedBox(height: 16),
+                      // H21: was a 6×6 GridView coloured by `i % 3 == 0` — a
+                      // decorative grid that looked like a QR code but encoded
+                      // nothing, so it could never actually be scanned. Now a
+                      // real QR of the promotion's redemption code.
                       Container(
-                        width: 160, height: 160,
                         color: Colors.white,
                         padding: const EdgeInsets.all(8),
-                        child: GridView.builder(
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 6, mainAxisSpacing: 2, crossAxisSpacing: 2),
-                          itemCount: 36,
-                          itemBuilder: (_, i) => Container(
-                            color: (i % 3 == 0 || i % 7 == 0 || i == 17 || i == 18) ? Colors.black : Colors.white,
-                          ),
+                        child: QrImageView(
+                          data: redemptionCode(p.id),
+                          version: QrVersions.auto,
+                          size: 160,
+                          backgroundColor: Colors.white,
                         ),
                       ),
                       const SizedBox(height: 16),

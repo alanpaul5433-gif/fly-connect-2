@@ -38,15 +38,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     return [0, 150, 300, 450, 600];
   }
 
-  // Metrics per range
-  Map<String, String> get _metrics {
-    switch (_range) {
-      case '7 days': return {'followers': '2,712', 'growth': '+4%', 'reach': '2,840', 'engagement': '1.8%'};
-      case '90 days': return {'followers': '2,840', 'growth': '+38%', 'reach': '24,200', 'engagement': '5.6%'};
-      default: return {'followers': '2,840', 'growth': '+12%', 'reach': '8,420', 'engagement': '4.2%'};
-    }
-  }
-
   List<int> get _currentBars {
     switch (_range) {
       case '7 days': return _barData7;
@@ -59,8 +50,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   Widget build(BuildContext context) {
     final bars = _currentBars;
     final maxBar = bars.reduce((a, b) => a > b ? a : b).toDouble();
-    final m = _metrics;
-    // Use real follower count from provider; keep other metrics as trend indicators
     final me = context.watch<UserProvider>().currentUser;
     final realFollowers = me?.followerCount ?? 0;
     // H19: scope to THIS business. The provider streams every business's
@@ -100,15 +89,19 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-          // Top metric cards
+          // Top metric cards — H20: every value is now real and scoped to this
+          // business (Growth/Reach/Engagement were hardcoded literals like
+          // '+12%'/'8,420' presented as measured data). Metrics that need
+          // historical snapshots or impression tracking we don't collect were
+          // dropped rather than fabricated.
           Row(children: [
             Expanded(child: _MetricCard(value: realFollowers.toString(), label: 'Followers')),
             const SizedBox(width: 10),
-            Expanded(child: _MetricCard(value: m['growth']!, label: 'Growth')),
+            Expanded(child: _MetricCard(value: '${activeDealCount(promotions)}', label: 'Deals')),
             const SizedBox(width: 10),
-            Expanded(child: _MetricCard(value: m['reach']!, label: 'Reach')),
+            Expanded(child: _MetricCard(value: '${totalViews(promotions)}', label: 'Views')),
             const SizedBox(width: 10),
-            Expanded(child: _MetricCard(value: m['engagement']!, label: 'Engagement')),
+            Expanded(child: _MetricCard(value: '${totalRedemptions(promotions)}', label: 'Redeemed')),
           ]),
 
           const SizedBox(height: 24),
