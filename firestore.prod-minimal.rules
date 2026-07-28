@@ -58,13 +58,24 @@ service cloud.firestore {
         && request.resource.data.isVerified == false
         && (!('verificationStatus' in request.resource.data)
             || request.resource.data.verificationStatus in ['none', 'pending']);
+      // SECURITY/BUGFIX (minimal delta 2026-07-28): follow was fully broken.
+      // followUser()/unfollowUser() (real_providers.dart:1024-1050) commit an
+      // atomic batch whose leg bumps the TARGET user's followerCount; a
+      // follower is neither owner nor admin, so that leg was denied and the
+      // whole batch (incl. the legit following/followers subcollection writes)
+      // rolled back with permission-denied. Allow any authed user to change
+      // ONLY followerCount by exactly +/-1 — mirrors the likeCount/rsvpCount/
+      // memberCount counter branches (posts/events/groups) already in prod.
       allow update: if isAdmin()
         || (isOwner(userId) && changedOnly([
               'name','phone','photoUrl','bio','airline','airport','position',
               'city','state','hobbies','passportStamps','travelHistory',
               'followerCount','followingCount','postCount',
               'lastSeen','matchType','matchPrefs','settings','lat','lng'
-            ]));
+            ]))
+        || (isAuth() && changedOnly(['followerCount'])
+            && (request.resource.data.followerCount == resource.data.followerCount + 1
+                || request.resource.data.followerCount == resource.data.followerCount - 1));
       allow delete: if isAdmin();
 
       match /private/{docId} {

@@ -59,7 +59,17 @@ service cloud.firestore {
               'city','state','hobbies','passportStamps','travelHistory',
               'followerCount','followingCount','postCount',
               'lastSeen','matchType','matchPrefs','settings','lat','lng'
-            ]));
+            ]))
+        // A follower is not the owner of the target's user doc, so
+        // followUser()/unfollowUser() (real_providers.dart:1024-1050) run an
+        // atomic batch whose leg that bumps the TARGET's followerCount was
+        // denied — which rolled back the whole batch and made follow/unfollow
+        // fail with permission-denied. Allow any authed user to change ONLY
+        // followerCount by exactly +/-1, mirroring the likeCount / rsvpCount /
+        // memberCount counter branches used elsewhere in this file.
+        || (isAuth() && changedOnly(['followerCount'])
+            && (request.resource.data.followerCount == resource.data.followerCount + 1
+                || request.resource.data.followerCount == resource.data.followerCount - 1));
       // B3: was admin-only, which made in-app account deletion impossible —
       // deleteAccount() failed with permission-denied on its very first write.
       // Play (since May 2024) and the App Store both require a user to be able
