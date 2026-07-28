@@ -46,6 +46,27 @@ binary rather than asserted in a plist.
 
 Analytics and Crashlytics still function; only the ad-identity variant was dropped.
 
+### Binary verification (build 5, `flutter build ios --release`, 2026-07-28)
+
+Checked against the compiled `Runner.app`, not the build settings:
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Ad frameworks linked | `otool -L Runner \| grep -iE 'AdSupport\|AppTrackingTransparency'` | **neither is linked** |
+| IDFA / ATT API references | `strings -a Runner \| grep -iE 'ASIdentifierManager\|advertisingIdentifier\|ATTrackingManager'` | **no matches** |
+| Analytics still present | `strings -a Runner \| grep -E 'FIRAnalytics\|GoogleAppMeasurement'` | present — Analytics works |
+| ATT usage string | `PlistBuddy -c 'Print :NSUserTrackingUsageDescription'` | does not exist |
+| Version | `CFBundleShortVersionString` / `CFBundleVersion` | 1.0.0 / 5 |
+
+`AdSupport.framework` is the only way to reach `ASIdentifierManager.advertisingIdentifier`.
+A binary that does not link it **cannot** read the IDFA under any runtime condition. This
+is the difference between "we promise we don't track" and "the binary is incapable of
+tracking," and it is independently checkable by App Review.
+
+Note `FirebaseAnalytics` is a *static* framework, so it does not appear in
+`Runner.app/Frameworks/` — it links directly into the `Runner` executable. Its absence
+from that directory is not evidence of anything; check the symbols instead.
+
 ### Android, because Apple asks about other platforms
 
 Apple's resolution option 2 asks whether the app tracks on platforms other than the
@@ -140,10 +161,13 @@ Paste into App Store Connect → Version Information → Notes for Review:
 > Track You." They are collected only for analytics and app functionality via Firebase
 > Analytics and Crashlytics. The app contains no advertising SDK, no attribution SDK, and
 > shares no data with data brokers. This build also removes the advertising-identifier
-> variant of the Firebase Analytics SDK, so the app has no ability to access the IDFA.
+> variant of the Firebase Analytics SDK: the binary does not link AdSupport.framework or
+> AppTrackingTransparency.framework, so it has no ability to access the IDFA at all.
 > The app's privacy manifest has always declared NSPrivacyTracking = false. Behaviour is
-> identical in all countries and regions. Because the app does not track on any platform,
-> no App Tracking Transparency prompt is present.
+> identical in all countries and regions. The Android build likewise removes the
+> advertising ID permission and disables all Google Analytics ad-personalization signals,
+> so the app does not track on any platform and no App Tracking Transparency prompt is
+> present.
 >
 > **Guideline 2.1(a) — Sign in with Apple**
 > Fixed. Apple's authorization code was not being passed to Firebase Authentication when
