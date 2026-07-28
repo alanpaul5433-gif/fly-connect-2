@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/constants/app_colors.dart';
+import '../../shared/widgets/cached_image.dart';
 import 'admin_audit_helper.dart';
 import 'cursor_paginator.dart';
 
@@ -402,19 +403,9 @@ class _AdminPromotionsPageState extends State<AdminPromotionsPage> {
             Container(width: 4, color: accent),
             Padding(
               padding: const EdgeInsets.all(12),
-              child: Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  color: AppColors.backgroundGrey,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Center(
-                  child: Text('IMG',
-                      style: TextStyle(
-                          color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w600)),
-                ),
+              child: PromoThumbnail(
+                imageUrl: p['imageUrl'] as String?,
+                title: title,
               ),
             ),
             Expanded(
@@ -527,6 +518,106 @@ class _AdminPromotionsPageState extends State<AdminPromotionsPage> {
                   ),
                 ],
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The deal image in the moderation queue, with tap-to-enlarge.
+///
+/// Public (rather than another private `_build…` on the State) so the three
+/// states below are reachable from a widget test. The page itself streams
+/// live Firestore with no injection seam, so anything left inside it is
+/// effectively untestable — which is how the original bug survived: the card
+/// rendered a hardcoded `Text('IMG')` box and never read `imageUrl` at all.
+///
+/// Admins approve or reject a business's deal partly on its image, and 100px
+/// is too small to judge one on, so the thumbnail opens a full-size view.
+class PromoThumbnail extends StatelessWidget {
+  final String? imageUrl;
+
+  /// Used for the screen-reader label only — admins tab through this queue.
+  final String title;
+
+  static const double _size = 100;
+
+  const PromoThumbnail({
+    super.key,
+    required this.imageUrl,
+    required this.title,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final url = imageUrl;
+
+    // imageUrl is optional at creation (create_promotion_screen.dart:88 only
+    // sets it when the business picked one), and a Storage object can be
+    // deleted after the fact, so this is a real state on both paths — not a
+    // defensive branch. It doubles as the loading and error visual.
+    final placeholder = Container(
+      width: _size,
+      height: _size,
+      decoration: BoxDecoration(
+        color: AppColors.backgroundGrey,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: const Center(
+        child: Text('IMG',
+            style: TextStyle(
+                color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+      ),
+    );
+
+    if (url == null || url.isEmpty) return placeholder;
+
+    return Semantics(
+      button: true,
+      label: 'View full-size image for $title',
+      child: InkWell(
+        onTap: () => _showFullSize(context, url),
+        borderRadius: BorderRadius.circular(8),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: CachedFeedImage(
+            url: url,
+            width: _size,
+            height: _size,
+            placeholder: placeholder,
+            errorWidget: placeholder,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showFullSize(BuildContext context, String url) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // InteractiveViewer so an admin can pinch/scroll into fine print —
+            // discount terms and expiry dates are often baked into the artwork.
+            Flexible(
+              child: InteractiveViewer(
+                child: CachedFeedImage(url: url, fit: BoxFit.contain),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.black54,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Close'),
             ),
           ],
         ),
