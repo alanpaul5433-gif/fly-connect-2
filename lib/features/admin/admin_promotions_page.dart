@@ -380,7 +380,7 @@ class _AdminPromotionsPageState extends State<AdminPromotionsPage> {
     final isActive = p['isActive'] == true;
     final expired = _isExpired(p);
     final views = p['views'] ?? 0;
-    final redemptions = p['redemptions'] ?? 0;
+    final redemptions = promoRedemptions(p);
 
     final accent = !isApproved
         ? AppColors.warning
@@ -524,6 +524,24 @@ class _AdminPromotionsPageState extends State<AdminPromotionsPage> {
       ),
     );
   }
+}
+
+/// Redemption count for a promo document, tolerant of both field names.
+///
+/// `PromotionModel.toMap` writes **`currentRedemptions`** (models.dart:62), but
+/// this page shipped reading `redemptions` — a name only the older seeded
+/// documents carry. Every business-created deal therefore reported
+/// "0 redemptions" in the moderation queue regardless of actual usage, and 0 is
+/// a believable number for a new deal, so nothing looked broken.
+///
+/// Both generations of document exist in production and neither is going away,
+/// so this reads the current name first and falls back to the legacy one. A
+/// non-numeric value degrades to 0 rather than throwing: this renders inside a
+/// list of up to 50 cards, and one malformed document must not take the whole
+/// moderation queue down.
+int promoRedemptions(Map<String, dynamic> promo) {
+  final value = promo['currentRedemptions'] ?? promo['redemptions'];
+  return value is num ? value.toInt() : 0;
 }
 
 /// The deal image in the moderation queue, with tap-to-enlarge.
