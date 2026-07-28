@@ -2,7 +2,8 @@ rules_version = '2';
 // MINIMAL-DELTA deploy 2026-07-28 — current PROD rules (deploy-marked 2026-07-24)
 // PLUS: validDomainId(), allowed_domains{}, app_config{}, AND a users-create
 // clamp forbidding client-set isVerified:true / verificationStatus:'verified'
-// (self-verify business escalation fix, mirrors firestore.rules:121-123).
+// (self-verify business escalation fix, mirrors firestore.rules:121-123),
+// AND gdpr_requests{} (never matched anywhere before — see that block).
 // Nothing else is changed. This does NOT touch crew signup domain-gating
 // (signupDomainOk is not added) or require the data backfills the full 623-line
 // repo ruleset needs. Do NOT enable app_config/signup_gate.enforced in prod with
@@ -261,6 +262,38 @@ service cloud.firestore {
     match /audit_log/{entryId} {
       allow read: if isAdmin();
       allow create: if isAdmin() && request.resource.data.adminId == request.auth.uid;
+    }
+
+    // ── ADDED (minimal delta 2026-07-28): GDPR export / deletion requests ──
+    // This collection has NEVER been matched — not in prod, not in the 633-line
+    // repo ruleset — so every write to it has been default-denied since the
+    // feature shipped. Two client write sites:
+    //   settings_screen.dart:299  "Request My Data"  → surfaces the raw
+    //       PERMISSION_DENIED to the user in a red snackbar.
+    //   settings_screen.dart:628  pre-deletion audit → swallowed as non-fatal,
+    //       so account deletion still works but the GDPR trail stays empty.
+    // Admin side (admin_gdpr_page.dart) lists and advances status only; it
+    // never creates or deletes, so create stays owner-only and delete is off.
+    //
+    // createdAt is REQUIRED on create: the admin queue orders by it, and
+    // Firestore's orderBy silently drops documents missing the field — the
+    // same bug that made app-created promotions invisible to admins.
+    //
+    // Deliberately NOT gated on isNotBanned(): a banned user keeps the right
+    // to request their data or its deletion.
+    match /gdpr_requests/{requestId} {
+      allow read: if isAdmin();
+      allow create: if isAuth()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.requestType in ['export', 'delete']
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll(
+             ['userId', 'requestType', 'status', 'createdAt'])
+        && request.resource.data.keys().hasOnly(
+             ['userId', 'userName', 'userEmail', 'requestType', 'status',
+              'createdAt', 'notes']);
+      allow update: if isAdmin();
+      allow delete: if false;
     }
 
     // ── Reports ────────────────────────────────────────────
