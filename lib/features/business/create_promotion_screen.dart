@@ -87,8 +87,14 @@ class _CreatePromotionScreenState extends State<CreatePromotionScreen> {
       // Upload image to Firebase Storage if one was picked
       String? imageUrl;
       if (_imageBytes != null) {
+        // Deal images go under user_uploads/{uid}/promos/ — the same namespace
+        // events use (user_uploads/{uid}/events/), which the deployed Storage
+        // rule `user_uploads/{uid}/{folder}/{file=**}` already permits (owner
+        // write, signed-in read). The previous `business_images/{uid}/promos/`
+        // path matched NO Storage rule, so it hit the default-deny and every
+        // deal-with-image publish failed with firebase_storage/unauthenticated.
         final ref = FirebaseStorage.instance.ref(
-            'business_images/${user.uid}/promos/${DateTime.now().millisecondsSinceEpoch}.jpg');
+            'user_uploads/${user.uid}/promos/${DateTime.now().millisecondsSinceEpoch}.jpg');
         await ref.putData(_imageBytes!, SettableMetadata(contentType: 'image/jpeg'));
         imageUrl = await ref.getDownloadURL();
       }
