@@ -2259,7 +2259,13 @@ class PromotionProvider extends ChangeNotifier {
 
   List<PromotionModel> get promotions => _promotions;
   List<PromotionModel> get activePromotions =>
-      _promotions.where((p) => p.isActive && p.isApproved).toList();
+      // Crew only see deals that are approved, active, AND not past their
+      // validTo — otherwise the feed shows stale expired promos (the admin
+      // page filters expiry via _isExpired; the crew feed must match).
+      _promotions
+          .where((p) =>
+              p.isActive && p.isApproved && p.validTo.isAfter(DateTime.now()))
+          .toList();
   List<PromotionModel> get expiredPromotions => _promotions.where((p) => !p.isActive).toList();
 
   /// An owning business's own promotions, regardless of approval/active
