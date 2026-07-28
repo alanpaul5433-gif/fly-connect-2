@@ -528,6 +528,11 @@ class AuthProvider extends ChangeNotifier {
         final oauthCredential = OAuthProvider('apple.com').credential(
           idToken: appleCredential.identityToken,
           rawNonce: rawNonce,
+          // Apple's authorizationCode MUST be passed as accessToken. Without it,
+          // firebase_auth on iOS rejects the credential with
+          // invalid-credential / "Invalid OAuth response from apple.com" even
+          // though the idToken/nonce are valid. See flutterfire #17466 / #3674.
+          accessToken: appleCredential.authorizationCode,
         );
         cred = await _auth.signInWithCredential(oauthCredential);
 
