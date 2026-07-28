@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants/app_colors.dart';
+import '../../core/constants/app_routes.dart';
 import 'admin_audit_helper.dart';
 
 class AdminReportsPage extends StatefulWidget {
@@ -16,6 +18,12 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
   String _statusFilter = 'all';
   String _typeFilter = 'all';
   bool _loading = true;
+
+  /// Non-null when the last fetch threw. Previously a failed load was
+  /// swallowed into debugPrint and the page rendered "No reports found",
+  /// so a permission error, a missing index and a genuinely empty queue
+  /// were indistinguishable to the admin.
+  String? _loadError;
 
   // Cursor pagination — Firestore cannot offset, so we keep the last
   // doc snapshot from each page and use startAfterDocument on the next.
@@ -36,6 +44,7 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
   Future<void> _fetchFirstPage() async {
     setState(() {
       _loading = true;
+      _loadError = null;
       _lastDoc = null;
       _hasMore = true;
     });
@@ -58,9 +67,32 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
       });
     } catch (e) {
       debugPrint('[AdminReports] fetch failed: $e');
+      if (mounted) setState(() => _loadError = _describeError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// Turns a Firestore exception into something an admin can act on.
+  /// The raw `[cloud_firestore/permission-denied] ...` string is accurate
+  /// but tells a moderator nothing about what to do next.
+  String _describeError(Object e) {
+    if (e is FirebaseException) {
+      switch (e.code) {
+        case 'permission-denied':
+          return 'You do not have permission to read reports. Confirm this '
+              'account still has the admin role.';
+        case 'failed-precondition':
+          return 'This query needs a Firestore index that has not been '
+              'created yet.';
+        case 'unavailable':
+          return 'Could not reach Firestore. Check your connection.';
+        case 'not-found':
+          return 'That record no longer exists — it may have been deleted.';
+      }
+      return e.message ?? e.code;
+    }
+    return e.toString();
   }
 
   Future<void> _fetchMore() async {
@@ -88,8 +120,21 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
       });
     } catch (e) {
       debugPrint('[AdminReports] fetchMore failed: $e');
-      if (mounted) setState(() => _loadingMore = false);
+      if (!mounted) return;
+      setState(() => _loadingMore = false);
+      // Don't blank the list that is already on screen — the loaded pages
+      // are still valid. Just say the next page failed.
+      _showMessage('Could not load more: ${_describeError(e)}',
+          isError: true);
     }
+  }
+
+  void _showMessage(String text, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(text),
+      backgroundColor: isError ? AppColors.error : null,
+    ));
   }
 
   /// Backwards-compat alias for the existing onPressed handlers.
@@ -124,10 +169,17 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
   }
 
   Future<void> _updateStatus(String docId, String status) async {
-    await FirebaseFirestore.instance
-        .collection('reports')
-        .doc(docId)
-        .update({'status': status});
+    try {
+      await FirebaseFirestore.instance
+          .collection('reports')
+          .doc(docId)
+          .update({'status': status});
+    } catch (e) {
+      debugPrint('[AdminReports] status update failed: $e');
+      _showMessage('Could not update the report: ${_describeError(e)}',
+          isError: true);
+      return;
+    }
     await logAdminAction(
       action: '${status}_report',
       targetType: 'report',
@@ -149,34 +201,111 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
     await _updateStatus(docId, 'dismissed');
   }
 
-  /// Opens the reported entity so an admin can review it in context (M-7 —
-  /// this button was previously a no-op even though targetType/targetId are
-  /// already written onto every report by reportPost/reportContent).
+  /// Shows what the report points at, and offers the admin page that can act
+  /// on it.
+  ///
+  /// This used to `push('/posts/:id')` and friends. Those are consumer routes;
+  /// the admin target registers none of them, so the push hit GoRouter's
+  /// `errorBuilder` — which lives outside the ShellRoute — and replaced the
+  /// entire console with "Page not found".
+  ///
+  /// No admin page takes a document id, so this cannot deep-link. It shows the
+  /// identifying fields instead and lets the admin copy the target's name
+  /// straight into the users search (applyUsersFilter matches name and email,
+  /// not id — which is why the name, not the id, is the primary copy action).
   void _viewTarget(Map<String, dynamic> r) {
     final targetType = reportTargetType(r);
     final targetId = (r['targetId'] ?? '') as String;
-    if (targetId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No target reference on this report.')));
+    final targetName = (r['targetName'] ?? '') as String;
+    if (targetId.isEmpty && targetName.isEmpty) {
+      _showMessage('No target reference on this report.');
       return;
     }
-    switch (targetType) {
-      case 'post':
-        GoRouter.of(context).push('/posts/$targetId');
-        break;
-      case 'user':
-        GoRouter.of(context).push('/users/$targetId');
-        break;
-      case 'group':
-        GoRouter.of(context).push('/groups/$targetId');
-        break;
-      case 'chat':
-        GoRouter.of(context).push('/conversation/$targetId');
-        break;
-      default:
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Cannot open a "$targetType" target directly.')));
-    }
+    final destination = adminRouteForTargetType(targetType);
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('Reported Target',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _targetRow('Type',
+                targetType.isEmpty ? 'unknown' : targetType.toUpperCase()),
+            if (targetName.isNotEmpty) _targetRow('Name', targetName),
+            if (targetId.isNotEmpty) _targetRow('ID', targetId),
+            const SizedBox(height: 12),
+            Text(
+              destination == null
+                  ? 'There is no admin page for "$targetType" targets yet.'
+                  : 'Search this name in the destination page to act on it.',
+              style: const TextStyle(
+                  fontSize: 12, color: AppColors.textSecondary),
+            ),
+          ],
+        ),
+        actions: [
+          if (targetName.isNotEmpty)
+            TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: targetName));
+                Navigator.of(ctx).pop();
+                _showMessage('Copied "$targetName" to the clipboard.');
+              },
+              child: const Text('Copy Name'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close',
+                style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          if (destination != null)
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                GoRouter.of(context).go(destination);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.dark,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+              child: Text(destination == AppRoutes.adminUsers
+                  ? 'Open Users'
+                  : 'Open Content'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _targetRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 54,
+            child: Text(label,
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary)),
+          ),
+          Expanded(
+            child: SelectableText(value,
+                style: const TextStyle(fontSize: 13)),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Bans the user who filed a (typically abusive/retaliatory) low-severity
@@ -198,17 +327,35 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
       confirmColor: AppColors.error,
     );
     if (!confirmed) return;
-    await FirebaseFirestore.instance.collection('users').doc(reporterId).update({'isBanned': true});
+    // `update()` throws not-found on a missing document, and this call was
+    // previously unawaited-by-any-handler: the throw escaped, the success
+    // snackbar never ran and no audit entry was written, so a failed ban was
+    // pixel-identical to no click at all. Verified live — of the four
+    // low-severity reports that show this button, two name a reporter whose
+    // user document no longer exists.
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(reporterId)
+          .update({'isBanned': true});
+    } catch (e) {
+      debugPrint('[AdminReports] ban failed: $e');
+      _showMessage(
+        e is FirebaseException && e.code == 'not-found'
+            ? 'Cannot ban ${r['reporterName'] ?? 'this reporter'} — their '
+                'account no longer exists.'
+            : 'Ban failed: ${_describeError(e)}',
+        isError: true,
+      );
+      return;
+    }
     await logAdminAction(
       action: 'ban_user',
       targetType: 'user',
       targetId: reporterId,
       details: 'Banned reporter of report ${r['id']} (low-severity report)',
     );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Reporter banned.')));
-    }
+    _showMessage('Reporter banned.');
   }
 
   Future<bool> _showConfirm(
@@ -263,6 +410,7 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
       return const Center(
           child: CircularProgressIndicator(color: AppColors.primary));
     }
+    if (_loadError != null) return _buildErrorState(_loadError!);
     final filtered = _filteredReports;
 
     return SingleChildScrollView(
@@ -378,6 +526,50 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  /// Shown instead of the queue when the fetch failed. The point is that this
+  /// is visibly NOT the empty state: an admin seeing "No reports found" during
+  /// an outage would reasonably conclude the queue was clear.
+  Widget _buildErrorState(String message) {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(32),
+        constraints: const BoxConstraints(maxWidth: 480),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: AppColors.error, size: 36),
+            const SizedBox(height: 12),
+            const Text('Could not load reports',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Text(message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 13, color: AppColors.textSecondary)),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: _fetchFirstPage,
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Retry'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.dark,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -653,6 +845,29 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
 String reportTargetType(Map<String, dynamic> report) {
   final value = report['type'] ?? report['targetType'];
   return value is String ? value : '';
+}
+
+/// The admin page that can act on a given report target, or null when none
+/// exists.
+///
+/// Deliberately returns only routes `adminRouter` registers. The bug this
+/// replaces was a push to `/posts/:id` — a consumer route absent from the
+/// admin build — which dropped the whole console onto GoRouter's
+/// "Page not found" screen.
+///
+/// `chat` and `trip` map to null on purpose: there is no admin surface for
+/// either, and offering navigation that goes nowhere useful would just be the
+/// same bug wearing a different costume.
+String? adminRouteForTargetType(String targetType) {
+  switch (targetType) {
+    case 'user':
+      return AppRoutes.adminUsers;
+    case 'post':
+    case 'comment':
+      return AppRoutes.adminContent;
+    default:
+      return null;
+  }
 }
 
 /// Queue order: severity first, then newest.

@@ -47,6 +47,65 @@ void main() {
     });
   });
 
+  /// "View Target" pushed `/posts/:id`, `/users/:id`, `/groups/:id` and
+  /// `/conversation/:id` — none of which exist in `adminRouter`. The admin
+  /// build deliberately strips every consumer route, so the push fell through
+  /// to GoRouter's `errorBuilder`, which sits OUTSIDE the ShellRoute: the
+  /// sidebar and the whole admin frame were replaced by a bare "Page not
+  /// found" screen, recoverable only with browser-back.
+  ///
+  /// Verified against production: 14 of the 20 live reports (post/chat/user)
+  /// hit that dead route. The remaining 6 (comment/trip) fell to the default
+  /// branch and merely showed a snackbar.
+  ///
+  /// So the destination must be a route this router actually registers.
+  /// `/admin/users` searches by name and email (applyUsersFilter), and
+  /// `/admin/content` is the reported-posts queue — neither takes a document
+  /// id, which is why the dialog also offers the target's name for pasting
+  /// into that search box.
+  group('adminRouteForTargetType', () {
+    test('user targets go to the admin users queue', () {
+      expect(adminRouteForTargetType('user'), '/admin/users');
+    });
+
+    test('post and comment targets go to the content queue', () {
+      expect(adminRouteForTargetType('post'), '/admin/content');
+      expect(adminRouteForTargetType('comment'), '/admin/content');
+    });
+
+    test('chat has no admin page, so it offers no destination', () {
+      // Returning a route here would recreate the original bug in a new
+      // costume: navigation that looks available and goes nowhere useful.
+      expect(adminRouteForTargetType('chat'), isNull);
+    });
+
+    test('trip has no admin page either', () {
+      expect(adminRouteForTargetType('trip'), isNull);
+    });
+
+    test('an absent type resolves to no destination rather than throwing', () {
+      expect(adminRouteForTargetType(''), isNull);
+    });
+
+    test('an unrecognised type is not routed', () {
+      expect(adminRouteForTargetType('spaceship'), isNull);
+    });
+
+    test('never returns a consumer route — the crash the fix exists for', () {
+      const dead = ['/posts', '/users/', '/groups', '/conversation'];
+      for (final type in ['user', 'post', 'comment', 'chat', 'trip', '']) {
+        final route = adminRouteForTargetType(type);
+        if (route == null) continue;
+        expect(route.startsWith('/admin/'), isTrue,
+            reason: '"$type" resolved to "$route", which adminRouter does not '
+                'register — that is the "Page not found" bug.');
+        for (final bad in dead) {
+          expect(route.startsWith(bad), isFalse);
+        }
+      }
+    });
+  });
+
   group('compareReports', () {
     test('orders high severity before medium before low', () {
       final high = {'severity': 'high', 'createdAt': at(1)};
