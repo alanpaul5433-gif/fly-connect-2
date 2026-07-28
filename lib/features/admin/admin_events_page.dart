@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/constants/app_colors.dart';
+import 'admin_thumbnail.dart';
 import 'admin_audit_helper.dart';
 
 class AdminEventsPage extends StatefulWidget {
@@ -29,18 +30,56 @@ class _AdminEventsPageState extends State<AdminEventsPage> {
           .orderBy('createdAt', descending: true)
           .limit(50)
           .get();
+      final events = snapshot.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        return data;
+      }).toList();
+      await _attachCreatorNames(events);
       if (!mounted) return;
-      setState(() {
-        _events = snapshot.docs.map((doc) {
-          final data = doc.data();
-          data['id'] = doc.id;
-          return data;
-        }).toList();
-      });
+      setState(() => _events = events);
     } catch (e) {
       debugPrint('[AdminEvents] fetch failed: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Fills in `creatorName` from the `createdBy` UID each event actually
+  /// stores.
+  ///
+  /// The card rendered `event['creatorName'] ?? 'Unknown'`, but no such field
+  /// has ever been written — events store `createdBy`, a UID. So every event
+  /// in the queue read "by Unknown", and an admin approving one had no idea
+  /// which business submitted it. Unlike the other field-name bugs this is not
+  /// a rename: the name is not in the document and has to be looked up.
+  ///
+  /// Distinct UIDs only — a business submitting ten events costs one read, not
+  /// ten. Failures leave `creatorName` unset so the existing 'Unknown'
+  /// fallback still renders; a name lookup must not take the queue down.
+  Future<void> _attachCreatorNames(List<Map<String, dynamic>> events) async {
+    final uids = events
+        .map((e) => e['createdBy'])
+        .whereType<String>()
+        .where((uid) => uid.isNotEmpty)
+        .toSet();
+    if (uids.isEmpty) return;
+
+    final names = <String, String>{};
+    await Future.wait(uids.map((uid) async {
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .get();
+        final name = doc.data()?['name'];
+        if (name is String && name.isNotEmpty) names[uid] = name;
+      } catch (_) {/* fall through to 'Unknown' for this one creator */}
+    }));
+
+    for (final event in events) {
+      final name = names[event['createdBy']];
+      if (name != null) event['creatorName'] = name;
     }
   }
 
@@ -332,6 +371,15 @@ class _AdminEventsPageState extends State<AdminEventsPage> {
                   topLeft: Radius.circular(12),
                   bottomLeft: Radius.circular(12),
                 ),
+              ),
+            ),
+            // Events carry an imageUrl that this page never rendered, so
+            // approvals happened without seeing the artwork being approved.
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: AdminThumbnail(
+                imageUrl: event['imageUrl'] as String?,
+                label: title,
               ),
             ),
 

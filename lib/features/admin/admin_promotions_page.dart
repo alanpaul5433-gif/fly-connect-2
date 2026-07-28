@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/constants/app_colors.dart';
+import 'admin_thumbnail.dart';
 import 'admin_audit_helper.dart';
 import 'cursor_paginator.dart';
 
@@ -379,7 +380,7 @@ class _AdminPromotionsPageState extends State<AdminPromotionsPage> {
     final isActive = p['isActive'] == true;
     final expired = _isExpired(p);
     final views = p['views'] ?? 0;
-    final redemptions = p['redemptions'] ?? 0;
+    final redemptions = promoRedemptions(p);
 
     final accent = !isApproved
         ? AppColors.warning
@@ -402,19 +403,9 @@ class _AdminPromotionsPageState extends State<AdminPromotionsPage> {
             Container(width: 4, color: accent),
             Padding(
               padding: const EdgeInsets.all(12),
-              child: Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  color: AppColors.backgroundGrey,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Center(
-                  child: Text('IMG',
-                      style: TextStyle(
-                          color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w600)),
-                ),
+              child: AdminThumbnail(
+                imageUrl: p['imageUrl'] as String?,
+                label: title,
               ),
             ),
             Expanded(
@@ -533,4 +524,22 @@ class _AdminPromotionsPageState extends State<AdminPromotionsPage> {
       ),
     );
   }
+}
+
+/// Redemption count for a promo document, tolerant of both field names.
+///
+/// `PromotionModel.toMap` writes **`currentRedemptions`** (models.dart:62), but
+/// this page shipped reading `redemptions` — a name only the older seeded
+/// documents carry. Every business-created deal therefore reported
+/// "0 redemptions" in the moderation queue regardless of actual usage, and 0 is
+/// a believable number for a new deal, so nothing looked broken.
+///
+/// Both generations of document exist in production and neither is going away,
+/// so this reads the current name first and falls back to the legacy one. A
+/// non-numeric value degrades to 0 rather than throwing: this renders inside a
+/// list of up to 50 cards, and one malformed document must not take the whole
+/// moderation queue down.
+int promoRedemptions(Map<String, dynamic> promo) {
+  final value = promo['currentRedemptions'] ?? promo['redemptions'];
+  return value is num ? value.toInt() : 0;
 }

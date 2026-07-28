@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants/app_colors.dart';
@@ -13,43 +14,8 @@ class AnalyticsScreen extends StatefulWidget {
 }
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
-  String _range = '30 days';
-
-  // Bar data per range
-  static const _barData7 = [42, 55, 38, 61, 49, 67, 80];
-  static const _barData30 = [120, 145, 132, 168, 155, 178, 210];
-  static const _barData90 = [320, 410, 380, 450, 420, 510, 590];
-  static const _dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  static const _weekLabels = ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7'];
-  static const _monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'];
-
-  List<String> get _barLabels {
-    switch (_range) {
-      case '7 days': return _dayLabels;
-      case '90 days': return _monthLabels;
-      default: return _weekLabels;
-    }
-  }
-
-  List<int> get _yAxisSteps {
-    final maxVal = _currentBars.reduce((a, b) => a > b ? a : b);
-    if (maxVal <= 100) return [0, 25, 50, 75, 100];
-    if (maxVal <= 250) return [0, 50, 100, 150, 200];
-    return [0, 150, 300, 450, 600];
-  }
-
-  List<int> get _currentBars {
-    switch (_range) {
-      case '7 days': return _barData7;
-      case '90 days': return _barData90;
-      default: return _barData30;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final bars = _currentBars;
-    final maxBar = bars.reduce((a, b) => a > b ? a : b).toDouble();
     final me = context.watch<UserProvider>().currentUser;
     final realFollowers = me?.followerCount ?? 0;
     // H19: scope to THIS business. The provider streams every business's
@@ -68,22 +34,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           onPressed: () => GoRouter.of(context).pop(),
         ),
         title: const Text('Analytics', style: AppTextStyles.labelLarge),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: DropdownButton<String>(
-              value: _range,
-              underline: const SizedBox(),
-              style: AppTextStyles.caption.copyWith(color: AppColors.textPrimary),
-              items: const [
-                DropdownMenuItem(value: '7 days', child: Text('7 days')),
-                DropdownMenuItem(value: '30 days', child: Text('30 days')),
-                DropdownMenuItem(value: '90 days', child: Text('90 days')),
-              ],
-              onChanged: (v) => setState(() => _range = v!),
-            ),
-          ),
-        ],
+        // The 7/30/90-day range selector drove only the demo bar chart, which
+        // is gone (H20) — real growth is a single since-baseline figure.
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -104,77 +56,27 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             Expanded(child: _MetricCard(value: '${totalRedemptions(promotions)}', label: 'Redeemed')),
           ]),
 
+          const SizedBox(height: 10),
+          // H20: real engagement rates derived from data we already collect —
+          // no fabrication, no time-series infra needed.
+          Row(children: [
+            Expanded(child: _RateChip(
+              label: 'Redemption rate',
+              value: '${(redemptionRate(promotions) * 100).toStringAsFixed(1)}%')),
+            const SizedBox(width: 10),
+            Expanded(child: _RateChip(
+              label: 'Save rate',
+              value: '${(saveRate(promotions) * 100).toStringAsFixed(1)}%')),
+          ]),
+
           const SizedBox(height: 24),
 
-          Row(children: [
-            const Text('Follower Growth', style: AppTextStyles.labelLarge),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.orange.shade100, borderRadius: BorderRadius.circular(4)),
-              child: const Text('Demo chart', style: TextStyle(fontSize: 10, color: Colors.orange)),
-            ),
-          ]),
+          const Text('Follower Growth', style: AppTextStyles.labelLarge),
           const SizedBox(height: 12),
-
-          Container(
-            height: 220,
-            padding: const EdgeInsets.fromLTRB(8, 12, 12, 8),
-            decoration: BoxDecoration(
-              color: AppColors.dark,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              // Y-axis labels
-              Padding(
-                padding: const EdgeInsets.only(bottom: 20),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: _yAxisSteps.reversed.map((v) =>
-                    Text(v.toString(),
-                      style: AppTextStyles.caption.copyWith(color: Colors.white38, fontSize: 9))).toList(),
-                ),
-              ),
-              const SizedBox(width: 6),
-              // Bars
-              Expanded(child: Column(children: [
-                Expanded(child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: List.generate(bars.length, (i) {
-                    final frac = bars[i] / maxBar;
-                    return Expanded(child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        Expanded(child: Align(
-                          alignment: Alignment.bottomCenter,
-                          child: FractionallySizedBox(
-                            heightFactor: frac,
-                            child: Container(
-                              margin: const EdgeInsets.symmetric(horizontal: 3),
-                              decoration: const BoxDecoration(
-                                color: AppColors.primary,
-                                borderRadius: BorderRadius.vertical(top: Radius.circular(4)),
-                              ),
-                            ),
-                          ),
-                        )),
-                      ],
-                    ));
-                  }),
-                )),
-                const SizedBox(height: 4),
-                Row(
-                  children: List.generate(bars.length, (i) => Expanded(
-                    child: Text(_barLabels[i],
-                      textAlign: TextAlign.center,
-                      style: AppTextStyles.caption.copyWith(color: Colors.white70, fontSize: 9)),
-                  )),
-                ),
-              ])),
-            ]),
-          ),
+          // H20: real growth from the daily follower snapshots the scheduled
+          // Cloud Function writes — replaces the "Demo chart" of fabricated
+          // bars. Reads empty until history accrues, never a made-up number.
+          _FollowerGrowth(uid: me?.uid, currentFollowers: realFollowers),
 
           const SizedBox(height: 24),
 
@@ -328,6 +230,80 @@ class _MetricCard extends StatelessWidget {
       const SizedBox(height: 2),
       Text(label, style: AppTextStyles.caption.copyWith(color: Colors.white70),
         textAlign: TextAlign.center),
+    ]),
+  );
+}
+
+/// Real follower growth (H20) from `users/{uid}/dailyStats` — the earliest
+/// snapshot is the baseline, compared to the current followerCount. Shows
+/// "building history…" until the scheduled snapshotter has run at least once.
+class _FollowerGrowth extends StatelessWidget {
+  final String? uid;
+  final int currentFollowers;
+  const _FollowerGrowth({required this.uid, required this.currentFollowers});
+
+  @override
+  Widget build(BuildContext context) {
+    final id = uid;
+    Widget shell(Widget child) => Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.dark, borderRadius: BorderRadius.circular(16)),
+      child: child,
+    );
+    final building = shell(Text('Building history — check back in a few days.',
+        style: AppTextStyles.bodySmall.copyWith(color: Colors.white70)));
+    if (id == null) return building;
+
+    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      future: FirebaseFirestore.instance
+          .collection('users').doc(id).collection('dailyStats')
+          .orderBy(FieldPath.documentId).limit(1).get(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return shell(const Center(
+            child: SizedBox(height: 20, width: 20,
+              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary))));
+        }
+        final docs = snap.data?.docs ?? const [];
+        if (docs.isEmpty) return building;
+
+        final baseline = (docs.first.data()['followerCount'] as num?)?.toInt();
+        final since = docs.first.id; // yyyy-mm-dd
+        final g = growthFraction(current: currentFollowers, baseline: baseline);
+        if (g == null) return building;
+
+        final up = g >= 0;
+        final pct = '${up ? '+' : ''}${(g * 100).toStringAsFixed(1)}%';
+        return shell(Row(children: [
+          Icon(up ? Icons.trending_up : Icons.trending_down,
+            color: up ? AppColors.primary : Colors.redAccent),
+          const SizedBox(width: 10),
+          Text(pct, style: AppTextStyles.h3.copyWith(
+            color: up ? AppColors.primary : Colors.redAccent)),
+          const SizedBox(width: 10),
+          Expanded(child: Text('since $since',
+            style: AppTextStyles.caption.copyWith(color: Colors.white54))),
+        ]));
+      },
+    );
+  }
+}
+
+/// Compact engagement-rate pill (H20). Lighter than a _MetricCard since a rate
+/// is a derived percentage, not a headline total.
+class _RateChip extends StatelessWidget {
+  final String value, label;
+  const _RateChip({required this.value, required this.label});
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+    decoration: BoxDecoration(
+      color: AppColors.backgroundGrey, borderRadius: BorderRadius.circular(12)),
+    child: Row(children: [
+      Expanded(child: Text(label, style: AppTextStyles.caption)),
+      Text(value, style: AppTextStyles.labelMedium.copyWith(color: AppColors.dark)),
     ]),
   );
 }

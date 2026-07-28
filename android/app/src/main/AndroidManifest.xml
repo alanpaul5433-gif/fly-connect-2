@@ -78,6 +78,25 @@
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyDHWqqTekBAR3R9x9rNWQ8CHAIhqZjX3Hk"/>
 
+        <!-- Analytics ad-signal opt-outs. Stripping the AD_ID permission above stops the
+             SDK *reading* the advertising ID; these three stop Analytics data being
+             shared onward to Google Ads for personalization and audience building.
+             Different mechanisms — the permission removal does not imply these.
+             Together with $FirebaseAnalyticsWithoutAdIdSupport in ios/Podfile, they make
+             "FlyConnect does not track on any platform" true of the binaries rather than
+             a claim in the App Review notes (Guideline 5.1.2(i), submission c284c411).
+             Reverse these only alongside a paid-acquisition decision — they are what
+             Google Ads attribution and remarketing audiences depend on. -->
+        <meta-data
+            android:name="google_analytics_adid_collection_enabled"
+            android:value="false"/>
+        <meta-data
+            android:name="google_analytics_default_allow_ad_personalization_signals"
+            android:value="false"/>
+        <meta-data
+            android:name="google_analytics_default_allow_ad_user_data"
+            android:value="false"/>
+
 
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

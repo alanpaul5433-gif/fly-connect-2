@@ -1,7 +1,7 @@
 name: flyconnect
 description: FlyConnect - Travel companion social app for airport employees
 publish_to: 'none'
-version: 1.0.0+4
+version: 1.0.0+6
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -57,6 +57,7 @@ dependencies:
   video_thumbnail: ^0.5.6
   visibility_detector: ^0.4.0+2
   geolocator: ^14.0.2
+  firebase_database: ^11.3.10
 
 dev_dependencies:
   flutter_test:

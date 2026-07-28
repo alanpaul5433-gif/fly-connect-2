@@ -13,6 +13,7 @@ import 'core/utils/app_router.dart';
 import 'features/common/force_update_screen.dart';
 import 'firebase_options.dart';
 import 'shared/providers/real_providers.dart';
+import 'shared/services/presence.dart';
 import 'shared/widgets/error_boundary.dart';
 
 Future<void> main() async {
@@ -120,10 +121,47 @@ class FlyConnectApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
         routerConfig: appRouter,
-        builder: (context, child) => _VersionGate(child: child),
+        builder: (context, child) =>
+            _VersionGate(child: _PresenceGate(child: child)),
       ),
     );
   }
+}
+
+/// Publishes the signed-in user's online/offline presence to RTDB (H8), and
+/// tears it down on sign-out. Real mode only — mock mode has no RTDB.
+class _PresenceGate extends StatefulWidget {
+  final Widget? child;
+  const _PresenceGate({required this.child});
+  @override
+  State<_PresenceGate> createState() => _PresenceGateState();
+}
+
+class _PresenceGateState extends State<_PresenceGate> {
+  final PresenceController _controller = PresenceController(PresenceService());
+  String? _startedFor;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final uid = Provider.of<AuthProvider>(context).currentUser?.uid;
+    if (uid == _startedFor) return;
+    _startedFor = uid;
+    if (uid != null) {
+      _controller.start(uid);
+    } else {
+      _controller.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.stop();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child ?? const SizedBox.shrink();
 }
 
 /// Runs the Firestore-backed force-update check on first build and

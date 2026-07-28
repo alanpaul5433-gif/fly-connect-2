@@ -1,0 +1,387 @@
+rules_version = '2';
+// MINIMAL-DELTA deploy 2026-07-28 — current PROD rules (deploy-marked 2026-07-24)
+// PLUS: validDomainId(), allowed_domains{}, app_config{}, AND a users-create
+// clamp forbidding client-set isVerified:true / verificationStatus:'verified'
+// (self-verify business escalation fix, mirrors firestore.rules:121-123),
+// AND gdpr_requests{} (never matched anywhere before — see that block).
+// Nothing else is changed. This does NOT touch crew signup domain-gating
+// (signupDomainOk is not added) or require the data backfills the full 623-line
+// repo ruleset needs. Do NOT enable app_config/signup_gate.enforced in prod with
+// an empty allowlist — it blocks crew signups.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ───────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+    function isAdmin() {
+      return isAuth() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    function isBusiness() {
+      return isAuth() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'business';
+    }
+    function isVerifiedBusiness() {
+      return isBusiness() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isVerified == true;
+    }
+    function isNotBanned() {
+      return isAuth() && !get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isBanned;
+    }
+    function changedOnly(allowedFields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowedFields);
+    }
+    // ADDED (minimal delta): domain-id validator for allowed_domains create.
+    // Mirrors canonicalizeDomain() in lib/shared/utils/email_domain.dart.
+    function validDomainId(d) {
+      return d is string
+        && d.size() >= 4 && d.size() <= 253
+        && d.matches('^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$');
+    }
+
+    // ── Users ──────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if isAuth();
+      // SECURITY (minimal delta 2026-07-28): isVerified / verificationStatus
+      // must not be client-settable at create time. Without this clamp a
+      // business signup can write {role:'business', isVerified:true} in the SAME
+      // create call and self-grant verified status, bypassing the admin-approval
+      // gate that isVerifiedBusiness() enforces (event / group / promotion
+      // creation). Mirrors firestore.rules:121-123. signupDomainOk() is
+      // deliberately NOT added here — the crew domain gate stays OFF (it needs
+      // the full ruleset + data backfills). This clamp is create-only, so
+      // genuinely-verified existing businesses are grandfathered.
+      allow create: if isOwner(userId)
+        && request.resource.data.role in ['user', 'business']  // admins created server-side
+        && request.resource.data.isBanned == false
+        && request.resource.data.isVerified == false
+        && (!('verificationStatus' in request.resource.data)
+            || request.resource.data.verificationStatus in ['none', 'pending']);
+      // SECURITY/BUGFIX (minimal delta 2026-07-28): follow was fully broken.
+      // followUser()/unfollowUser() (real_providers.dart:1024-1050) commit an
+      // atomic batch whose leg bumps the TARGET user's followerCount; a
+      // follower is neither owner nor admin, so that leg was denied and the
+      // whole batch (incl. the legit following/followers subcollection writes)
+      // rolled back with permission-denied. Allow any authed user to change
+      // ONLY followerCount by exactly +/-1 — mirrors the likeCount/rsvpCount/
+      // memberCount counter branches (posts/events/groups) already in prod.
+      allow update: if isAdmin()
+        || (isOwner(userId) && changedOnly([
+              'name','phone','photoUrl','bio','airline','airport','position',
+              'city','state','hobbies','passportStamps','travelHistory',
+              'followerCount','followingCount','postCount',
+              'lastSeen','matchType','matchPrefs','settings','lat','lng'
+            ]))
+        || (isAuth() && changedOnly(['followerCount'])
+            && (request.resource.data.followerCount == resource.data.followerCount + 1
+                || request.resource.data.followerCount == resource.data.followerCount - 1));
+      allow delete: if isAdmin();
+
+      match /private/{docId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId);
+      }
+      match /following/{followedId} {
+        allow read: if isAuth();
+        allow write: if isOwner(userId);
+      }
+      match /followers/{followerId} {
+        allow read: if isAuth();
+        allow write: if isOwner(followerId) && isNotBanned() && followerId != userId;
+      }
+      match /blocked/{blockedId} {
+        allow read, write: if isOwner(userId);
+      }
+      match /savedPosts/{postId} {
+        allow read, write: if isOwner(userId);
+      }
+      match /trips/{tripId} {
+        allow read: if isAuth();
+        allow write: if isOwner(userId);
+      }
+    }
+
+    // ── "Who blocked me", across all users ─────────────────
+    match /{path=**}/blocked/{blockedId} {
+      allow read: if isAuth() && resource.data.blockedUid == request.auth.uid;
+    }
+
+    // ── Posts ──────────────────────────────────────────────
+    match /posts/{postId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && isNotBanned()
+        && request.resource.data.authorId == request.auth.uid;
+      allow update: if isOwner(resource.data.authorId) || isAdmin()
+        || (isAuth() && isNotBanned() && changedOnly(['reportCount','isReported'])
+            && request.resource.data.reportCount == resource.data.reportCount + 1
+            && request.resource.data.isReported == true)
+        || (isAuth() && changedOnly(['likeCount'])
+            && (request.resource.data.likeCount == resource.data.likeCount + 1
+                || request.resource.data.likeCount == resource.data.likeCount - 1))
+        || (isAuth() && changedOnly(['commentCount'])
+            && (request.resource.data.commentCount == resource.data.commentCount + 1
+                || request.resource.data.commentCount == resource.data.commentCount - 1));
+      allow delete: if isOwner(resource.data.authorId) || isAdmin();
+
+      match /likes/{userId} {
+        allow read: if isAuth();
+        allow write: if isOwner(userId);
+      }
+      match /comments/{commentId} {
+        allow read: if isAuth();
+        allow create: if isAuth() && isNotBanned()
+          && request.resource.data.authorId == request.auth.uid;
+        allow delete: if isOwner(resource.data.authorId) || isAdmin();
+      }
+    }
+
+    // ── Stories ────────────────────────────────────────────
+    match /stories/{uid} {
+      allow read: if isAuth();
+      allow write: if isOwner(uid);
+    }
+
+    // ── Chats ──────────────────────────────────────────────
+    match /chats/{chatId} {
+      allow read: if isAuth() && request.auth.uid in resource.data.participants;
+      allow create: if isAuth()
+        && request.auth.uid in request.resource.data.participants
+        && request.resource.data.participants.size() <= 50;
+      allow update: if isAuth()
+        && request.auth.uid in resource.data.participants
+        && request.resource.data.participants == resource.data.participants;
+
+      match /messages/{messageId} {
+        allow read: if isAuth()
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+        allow create: if isAuth()
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants
+          && isNotBanned()
+          && request.resource.data.senderId == request.auth.uid;
+        allow update: if isAuth()
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants
+          && request.resource.data.senderId == resource.data.senderId
+          && (isOwner(resource.data.senderId) || changedOnly(['readBy']));
+        allow delete: if isOwner(resource.data.senderId) || isAdmin();
+      }
+      match /typing/{userId} {
+        allow read, write: if isAuth()
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants
+          && request.auth.uid == userId;
+      }
+    }
+
+    // ── Events ─────────────────────────────────────────────
+    match /events/{eventId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && isNotBanned() && (isVerifiedBusiness() || isAdmin())
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isOwner(resource.data.createdBy) || isAdmin()
+        || (isAuth() && changedOnly(['rsvpCount','rsvpList'])
+            && ((request.resource.data.rsvpCount == resource.data.rsvpCount + 1
+                  && request.resource.data.rsvpList.size() == resource.data.rsvpList.size() + 1
+                  && request.auth.uid in request.resource.data.rsvpList
+                  && !(request.auth.uid in resource.data.rsvpList))
+                || (request.resource.data.rsvpCount == resource.data.rsvpCount - 1
+                  && request.resource.data.rsvpList.size() == resource.data.rsvpList.size() - 1
+                  && !(request.auth.uid in request.resource.data.rsvpList)
+                  && request.auth.uid in resource.data.rsvpList)));
+      allow delete: if isOwner(resource.data.createdBy) || isAdmin();
+
+      match /rsvps/{userId} {
+        allow read: if isAuth();
+        allow write: if isOwner(userId) || isAdmin()
+          || isOwner(get(/databases/$(database)/documents/events/$(eventId)).data.createdBy);
+      }
+    }
+
+    // ── Groups ─────────────────────────────────────────────
+    match /groups/{groupId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && isNotBanned() && (isVerifiedBusiness() || isAdmin())
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAdmin()
+        || (isAuth() && request.auth.uid in resource.data.admins)
+        || (isAuth() && changedOnly(['members','memberCount'])
+            && ((request.resource.data.memberCount == resource.data.memberCount + 1
+                  && request.resource.data.members.size() == resource.data.members.size() + 1
+                  && request.auth.uid in request.resource.data.members
+                  && !(request.auth.uid in resource.data.members))
+                || (request.resource.data.memberCount == resource.data.memberCount - 1
+                  && request.resource.data.members.size() == resource.data.members.size() - 1
+                  && !(request.auth.uid in request.resource.data.members)
+                  && request.auth.uid in resource.data.members)));
+      allow delete: if isOwner(resource.data.createdBy) || isAdmin();
+
+      match /broadcasts/{broadcastId} {
+        allow read: if isAuth() && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.members;
+        allow create: if isAuth()
+          && (isAdmin() || request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.admins)
+          && request.resource.data.senderId == request.auth.uid;
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // ── Matches ────────────────────────────────────────────
+    match /matches/{matchId} {
+      allow read: if isAuth()
+        && (request.auth.uid == resource.data.userA
+            || request.auth.uid == resource.data.userB);
+      allow create: if isAuth()
+        && request.auth.uid == request.resource.data.userA;
+      allow update: if isAuth()
+        && request.auth.uid == resource.data.userB
+        && resource.data.status == 'pending'
+        && request.resource.data.status == 'matched'
+        && changedOnly(['status','matchedAt','chatId']);
+      allow delete: if isOwner(resource.data.userA) || isAdmin();
+    }
+
+    // ── Notifications ──────────────────────────────────────
+    match /notifications/{notificationId} {
+      allow read: if isOwner(resource.data.userId);
+      allow update: if isOwner(resource.data.userId)
+        && changedOnly(['isRead']);
+      allow delete: if isOwner(resource.data.userId);
+      allow create: if isAdmin()
+        || (isAuth() && request.resource.data.userId == request.auth.uid);
+    }
+
+    // ── SafeChecks ────────────────────────────────────────
+    match /safeChecks/{checkId} {
+      allow read: if isAuth() && isNotBanned();
+      allow create: if isAuth() && isNotBanned()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if isOwner(resource.data.userId) || isAdmin();
+      allow delete: if isOwner(resource.data.userId) || isAdmin();
+    }
+
+    // ── Audit Log ──────────────────────────────────────────
+    match /audit_log/{entryId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && request.resource.data.adminId == request.auth.uid;
+    }
+
+    // ── ADDED (minimal delta 2026-07-28): GDPR export / deletion requests ──
+    // This collection has NEVER been matched — not in prod, not in the 633-line
+    // repo ruleset — so every write to it has been default-denied since the
+    // feature shipped. Two client write sites:
+    //   settings_screen.dart:299  "Request My Data"  → surfaces the raw
+    //       PERMISSION_DENIED to the user in a red snackbar.
+    //   settings_screen.dart:628  pre-deletion audit → swallowed as non-fatal,
+    //       so account deletion still works but the GDPR trail stays empty.
+    // Admin side (admin_gdpr_page.dart) lists and advances status only; it
+    // never creates or deletes, so create stays owner-only and delete is off.
+    //
+    // createdAt is REQUIRED on create: the admin queue orders by it, and
+    // Firestore's orderBy silently drops documents missing the field — the
+    // same bug that made app-created promotions invisible to admins.
+    //
+    // Deliberately NOT gated on isNotBanned(): a banned user keeps the right
+    // to request their data or its deletion.
+    match /gdpr_requests/{requestId} {
+      allow read: if isAdmin();
+      allow create: if isAuth()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.requestType in ['export', 'delete']
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll(
+             ['userId', 'requestType', 'status', 'createdAt'])
+        && request.resource.data.keys().hasOnly(
+             ['userId', 'userName', 'userEmail', 'requestType', 'status',
+              'createdAt', 'notes']);
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // ── Reports ────────────────────────────────────────────
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isAuth() && isNotBanned()
+        && request.resource.data.reporterId == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Promotions ─────────────────────────────────────────
+    match /promotions/{promoId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && isNotBanned() && (isVerifiedBusiness() || isAdmin())
+        && request.resource.data.businessId == request.auth.uid;
+      allow update: if isOwner(resource.data.businessId) || isAdmin();
+      allow delete: if isOwner(resource.data.businessId) || isAdmin();
+    }
+
+    // ── Trips (top-level) ──────────────────────────────────
+    match /trips/{tripId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && isNotBanned()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if isOwner(resource.data.userId);
+      allow delete: if isOwner(resource.data.userId) || isAdmin();
+    }
+
+    // ── App version gate (force / soft update) ─────────────
+    match /config/{docId} {
+      allow get: if docId == 'app_version' || isAdmin();
+      allow list: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ── ADDED (minimal delta): Signup email-domain allowlist ─────────
+    // Admin panel: Allowed Domains page. `get` is public (a bounded probe
+    // oracle by design); list/create/update are admin-only; delete is soft
+    // (toggle `enabled`) only. Adding a domain here does NOT change signup
+    // behavior yet — the users-create rule above is unchanged, so the gate
+    // stays OFF until the full signup-gate ruleset is deployed deliberately.
+    match /allowed_domains/{domainId} {
+      allow get: if true;
+      allow list: if isAdmin();
+
+      allow create: if isAdmin()
+        && validDomainId(domainId)
+        && request.resource.data.domain == domainId
+        && request.resource.data.keys().hasAll(['domain', 'enabled', 'addedBy', 'addedAt'])
+        && request.resource.data.keys().hasOnly(
+             ['domain', 'label', 'enabled', 'addedBy', 'addedAt', 'updatedBy', 'updatedAt', 'notes'])
+        && request.resource.data.enabled is bool
+        && request.resource.data.addedBy == request.auth.uid
+        && request.resource.data.addedAt == request.time
+        && (!('label' in request.resource.data)
+            || (request.resource.data.label is string
+                && request.resource.data.label.size() <= 120))
+        && (!('notes' in request.resource.data)
+            || (request.resource.data.notes is string
+                && request.resource.data.notes.size() <= 500));
+
+      allow update: if isAdmin()
+        && changedOnly(['enabled', 'label', 'notes', 'updatedBy', 'updatedAt'])
+        && request.resource.data.enabled is bool
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time
+        && (!('notes' in request.resource.data)
+            || (request.resource.data.notes is string
+                && request.resource.data.notes.size() <= 500));
+
+      allow delete: if false;
+    }
+
+    // ── ADDED (minimal delta): Signup gate config ────────────────────
+    // Only signup_gate is publicly gettable (the client reads it before signup).
+    // WARNING: writing {enforced:true} here turns the crew-signup domain gate ON;
+    // with an empty allowlist that blocks all crew signups. Leave it OFF.
+    match /app_config/{docId} {
+      allow get: if docId == 'signup_gate' || isAdmin();
+      allow list: if isAdmin();
+      allow write: if isAdmin()
+        && docId == 'signup_gate'
+        && request.resource.data.keys().hasOnly(['enforced', 'updatedBy', 'updatedAt'])
+        && request.resource.data.enforced is bool
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time;
+    }
+  }
+}

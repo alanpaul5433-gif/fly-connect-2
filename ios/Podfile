@@ -4,6 +4,23 @@ platform :ios, '15.0'
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
+# Build Analytics WITHOUT the advertising-identifier variant.
+#
+# firebase_analytics.podspec reads this global and swaps its dependency from
+# `Firebase/Analytics` to `Firebase/AnalyticsWithoutAdIdSupport`, which drops
+# GoogleAppMeasurementIdentitySupport (reads the IDFA) and
+# GoogleAdsOnDeviceConversion (Google's ads conversion measurement) from the
+# link line. Both arrive transitively — nothing in pubspec.yaml asks for ads —
+# and FlyConnect has no ad or attribution SDK, so the capability is pure
+# liability: it is what makes an App Store reviewer expect an
+# AppTrackingTransparency prompt (Guideline 5.1.2(i), submission
+# c284c411, rejected 2026-07-23).
+#
+# Removing it is what makes `NSPrivacyTracking = false` in
+# Runner/PrivacyInfo.xcprivacy a property of the binary rather than a promise.
+# Must be set before flutter_install_all_ios_pods evaluates the podspecs.
+$FirebaseAnalyticsWithoutAdIdSupport = true
+
 project 'Runner', {
   'Debug' => :debug,
   'Profile' => :release,

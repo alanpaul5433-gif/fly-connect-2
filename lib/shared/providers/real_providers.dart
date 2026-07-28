@@ -528,6 +528,11 @@ class AuthProvider extends ChangeNotifier {
         final oauthCredential = OAuthProvider('apple.com').credential(
           idToken: appleCredential.identityToken,
           rawNonce: rawNonce,
+          // Apple's authorizationCode MUST be passed as accessToken. Without it,
+          // firebase_auth on iOS rejects the credential with
+          // invalid-credential / "Invalid OAuth response from apple.com" even
+          // though the idToken/nonce are valid. See flutterfire #17466 / #3674.
+          accessToken: appleCredential.authorizationCode,
         );
         cred = await _auth.signInWithCredential(oauthCredential);
 
@@ -1115,12 +1120,17 @@ class PostProvider extends ChangeNotifier {
     if (isMock) return;
     if (_uid == null) return;
     final user = _auth.currentUser!;
+    // Denormalized author fields, same precedence as createPost: the app
+    // profile is the source of truth for name/photo, FirebaseAuth is the
+    // fallback. Without the photo the comment avatar is stuck on the initial.
+    final profile = _storedAuth?.currentUser;
     final ref = _db.collection('posts').doc(postId).collection('comments').doc();
     await ref.set({
       // postAuthorId denormalised so the post author can delete this comment
       // when they delete the post (H13, see firestore.rules).
       'postId': postId, 'authorId': _uid, 'postAuthorId': postAuthorId,
-      'authorName': user.displayName ?? 'User',
+      'authorName': profile?.name ?? user.displayName ?? 'User',
+      'authorPhotoUrl': profile?.photoUrl ?? user.photoURL,
       'text': text, 'likeCount': 0, 'createdAt': FieldValue.serverTimestamp(),
     });
     await _db.collection('posts').doc(postId).update({'commentCount': FieldValue.increment(1)});
@@ -1411,9 +1421,14 @@ class PostProvider extends ChangeNotifier {
     }
     if (_uid == null) return;
     final user = _auth.currentUser!;
+    // Denormalized author fields: prefer the app profile (UserModel), which is the
+    // source of truth for name/photo, and fall back to the FirebaseAuth user.
+    final profile = _storedAuth?.currentUser;
     final ref = _db.collection('posts').doc();
     final post = PostModel(
-      id: ref.id, authorId: _uid!, authorName: user.displayName ?? 'User',
+      id: ref.id, authorId: _uid!,
+      authorName: profile?.name ?? user.displayName ?? 'User',
+      authorPhotoUrl: profile?.photoUrl ?? user.photoURL,
       caption: caption, mediaUrls: mediaUrls, mediaType: mediaType,
       thumbnailUrl: thumbnailUrl, aspectRatio: aspectRatio, durationMs: durationMs,
       location: location, groupId: groupId, createdAt: DateTime.now(),
@@ -2259,7 +2274,13 @@ class PromotionProvider extends ChangeNotifier {
 
   List<PromotionModel> get promotions => _promotions;
   List<PromotionModel> get activePromotions =>
-      _promotions.where((p) => p.isActive && p.isApproved).toList();
+      // Crew only see deals that are approved, active, AND not past their
+      // validTo — otherwise the feed shows stale expired promos (the admin
+      // page filters expiry via _isExpired; the crew feed must match).
+      _promotions
+          .where((p) =>
+              p.isActive && p.isApproved && p.validTo.isAfter(DateTime.now()))
+          .toList();
   List<PromotionModel> get expiredPromotions => _promotions.where((p) => !p.isActive).toList();
 
   /// An owning business's own promotions, regardless of approval/active

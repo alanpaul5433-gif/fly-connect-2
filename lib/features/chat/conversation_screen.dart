@@ -9,7 +9,11 @@ import '../../shared/providers/post_provider.dart';
 import '../../shared/models/models.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../shared/widgets/cached_image.dart';
+import '../../shared/services/presence.dart';
 import 'typing_reporter.dart';
+
+const TextStyle _statusStyle = TextStyle(
+    fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.online);
 
 class ConversationScreen extends StatefulWidget {
   final String chatId;
@@ -28,6 +32,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
   // H25: writes typing state only on idle↔typing transitions (not per
   // keystroke) and is force-stopped on send and dispose.
   late final TypingReporter _typing;
+  // H8: real presence via RTDB. Null in mock mode (no RTDB there).
+  PresenceService? _presence;
 
   @override
   void initState() {
@@ -35,6 +41,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
     final chatProvider = context.read<ChatProvider>();
     // Captured here so dispose() doesn't touch a disposed BuildContext.
     _typing = TypingReporter((t) => chatProvider.setTyping(widget.chatId, t));
+    if (!context.read<AuthProvider>().isMock) _presence = PresenceService();
     chatProvider.markAsRead(widget.chatId);
     chatProvider.markMessagesRead(widget.chatId);
   }
@@ -281,22 +288,31 @@ class _ConversationScreenState extends State<ConversationScreen> {
           const SizedBox(width: 10),
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(widget.otherName, style: const TextStyle(color: Colors.black, fontSize: 15, fontWeight: FontWeight.w600)),
-            // H8: the status line hardcoded 'Online' (even for a group) with no
-            // presence data behind it. Now it shows the real 'typing…' signal
-            // when present and nothing otherwise — never a fabricated status.
+            // H8: real status only. 'typing…' (live) takes priority; otherwise
+            // real RTDB presence — 'Online' / 'last seen …' — or nothing when
+            // we genuinely don't know. Never a fabricated 'Online'.
             StreamBuilder<Map<String, bool>>(
               stream: context.read<ChatProvider>().watchTyping(widget.chatId),
               builder: (_, snap) {
                 final typing = snap.data?.entries
                     .where((e) => e.key != myUid && e.value).isNotEmpty ?? false;
-                if (!typing) return const SizedBox.shrink();
-                // Contrast: `AppColors.online` is a darker green that passes the
-                // 3:1 large-text bar (AppColors.primary on white is 1.7:1).
-                return const Text('typing...',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.online));
+                if (typing) {
+                  // Contrast: AppColors.online passes the 3:1 large-text bar
+                  // (AppColors.primary on white is 1.7:1).
+                  return const Text('typing...', style: _statusStyle);
+                }
+                // No presence for a group, an unknown other, or mock mode.
+                if (_presence == null || widget.otherUid == null || widget.isGroup) {
+                  return const SizedBox.shrink();
+                }
+                return StreamBuilder<Presence>(
+                  stream: _presence!.watch(widget.otherUid!),
+                  builder: (_, ps) {
+                    final label = presenceLabel(
+                        ps.data ?? Presence.unknown, DateTime.now());
+                    if (label == null) return const SizedBox.shrink();
+                    return Text(label, style: _statusStyle);
+                  });
               }),
           ]),
         ]),

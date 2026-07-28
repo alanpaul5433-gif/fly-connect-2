@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/constants/app_colors.dart';
+import 'admin_thumbnail.dart';
 import 'admin_audit_helper.dart';
 import 'admin_filter_logic.dart';
 import 'cursor_paginator.dart';
@@ -443,6 +444,17 @@ class _AdminContentPageState extends State<AdminContentPage> {
         children: [
           // Accent bar
           Container(width: 4, color: accentColor),
+          // The reported media. Posts store images in `mediaUrls`, which this
+          // page never read — so an admin decided whether to remove a reported
+          // post without seeing the image, which is often the reason it was
+          // reported at all.
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: AdminThumbnail(
+              imageUrl: firstPostMediaUrl(report),
+              label: 'post by $authorName',
+            ),
+          ),
           // Content
           Expanded(
             child: Padding(
