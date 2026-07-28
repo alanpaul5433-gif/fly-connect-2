@@ -30,28 +30,8 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
     _fetchFirstPage();
   }
 
-  /// Sort by severity (high > medium > low) then reportCount descending,
-  /// preserving the existing in-memory ordering for the combined list.
-  void _sortReports() {
-    int sevRank(String s) {
-      switch (s) {
-        case 'high':
-          return 0;
-        case 'medium':
-          return 1;
-        default:
-          return 2;
-      }
-    }
-    _reports.sort((a, b) {
-      final sa = sevRank((a['severity'] ?? 'low') as String);
-      final sb = sevRank((b['severity'] ?? 'low') as String);
-      if (sa != sb) return sa.compareTo(sb);
-      final ra = (a['reportCount'] ?? 0) as num;
-      final rb = (b['reportCount'] ?? 0) as num;
-      return rb.compareTo(ra);
-    });
-  }
+  /// Sort by severity (high > medium > low), then newest first.
+  void _sortReports() => _reports.sort(compareReports);
 
   Future<void> _fetchFirstPage() async {
     setState(() {
@@ -118,7 +98,7 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
   List<Map<String, dynamic>> get _filteredReports {
     return _reports.where((r) {
       final status = (r['status'] ?? 'pending') as String;
-      final type = (r['type'] ?? '') as String;
+      final type = reportTargetType(r);
       if (_statusFilter != 'all' && status != _statusFilter) return false;
       if (_typeFilter != 'all' && type != _typeFilter) return false;
       return true;
@@ -173,7 +153,7 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
   /// this button was previously a no-op even though targetType/targetId are
   /// already written onto every report by reportPost/reportContent).
   void _viewTarget(Map<String, dynamic> r) {
-    final targetType = (r['targetType'] ?? '') as String;
+    final targetType = reportTargetType(r);
     final targetId = (r['targetId'] ?? '') as String;
     if (targetId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -467,7 +447,7 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
   Widget _buildReportCard(Map<String, dynamic> r) {
     final severity = (r['severity'] ?? 'low') as String;
     final accent = _severityColor(severity);
-    final type = (r['type'] ?? 'unknown') as String;
+    final type = reportTargetType(r).isEmpty ? 'unknown' : reportTargetType(r);
     final reason = (r['reason'] ?? 'No reason') as String;
     final description = (r['description'] ?? '') as String;
     final reporterName = (r['reporterName'] ?? 'Anonymous') as String;
@@ -655,4 +635,59 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
       ),
     );
   }
+}
+
+/// The kind of thing a report points at: `post`, `chat`, `user`, …
+///
+/// **Two schemas are live simultaneously**, and both are real data:
+///   * the app writes `targetType` (real_providers.dart:1442, :1545)
+///   * seeded production documents carry `type`
+///
+/// This page previously mixed them — "view target" switched on `targetType`
+/// (dead for every seeded report) while the type filter and badge read `type`
+/// (blank or "unknown" for every app-created report). Each report broke one
+/// way or the other, which is what disguised it as cosmetic.
+///
+/// Reading both is therefore not defensive padding; dropping either name
+/// breaks a population of documents that already exists.
+String reportTargetType(Map<String, dynamic> report) {
+  final value = report['type'] ?? report['targetType'];
+  return value is String ? value : '';
+}
+
+/// Queue order: severity first, then newest.
+///
+/// The old tiebreaker read `reportCount`, which reports do not carry, so it
+/// compared 0 against 0 and the ordering inside a severity band was whatever
+/// Firestore happened to return. `createdAt` is present on every report and
+/// matches what an admin wants — the newest unhandled report at the top.
+///
+/// Undated documents sort last rather than throwing; a single malformed
+/// report must not break the whole queue's ordering.
+int compareReports(Map<String, dynamic> a, Map<String, dynamic> b) {
+  int severityRank(Map<String, dynamic> r) {
+    switch (r['severity']) {
+      case 'high':
+        return 0;
+      case 'medium':
+        return 1;
+      default:
+        return 2;
+    }
+  }
+
+  final rankDelta = severityRank(a).compareTo(severityRank(b));
+  if (rankDelta != 0) return rankDelta;
+
+  DateTime? createdAt(Map<String, dynamic> r) {
+    final value = r['createdAt'];
+    return value is Timestamp ? value.toDate() : null;
+  }
+
+  final da = createdAt(a);
+  final db = createdAt(b);
+  if (da == null && db == null) return 0;
+  if (da == null) return 1;
+  if (db == null) return -1;
+  return db.compareTo(da);
 }

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flyconnect/features/admin/admin_promotions_page.dart';
+import 'package:flyconnect/features/admin/admin_thumbnail.dart';
 import 'package:flyconnect/shared/widgets/cached_image.dart';
 
 /// The admin moderation queue rendered a hardcoded `Text('IMG')` box in place
@@ -15,11 +15,11 @@ import 'package:flyconnect/shared/widgets/cached_image.dart';
 void main() {
   Widget host(Widget child) => MaterialApp(home: Scaffold(body: child));
 
-  group('PromoThumbnail', () {
+  group('AdminThumbnail', () {
     testWidgets('renders the image when the promo has one', (tester) async {
-      await tester.pumpWidget(host(const PromoThumbnail(
+      await tester.pumpWidget(host(const AdminThumbnail(
         imageUrl: 'https://example.com/deal.jpg',
-        title: '50% Off Crew Meals',
+        label: '50% Off Crew Meals',
       )));
 
       expect(find.byType(CachedFeedImage), findsOneWidget,
@@ -37,9 +37,9 @@ void main() {
 
     testWidgets('falls back to the placeholder when there is no image',
         (tester) async {
-      await tester.pumpWidget(host(const PromoThumbnail(
+      await tester.pumpWidget(host(const AdminThumbnail(
         imageUrl: null,
-        title: 'Untitled',
+        label: 'Untitled',
       )));
 
       // imageUrl is genuinely optional at creation
@@ -50,9 +50,9 @@ void main() {
     });
 
     testWidgets('treats an empty imageUrl as no image', (tester) async {
-      await tester.pumpWidget(host(const PromoThumbnail(
+      await tester.pumpWidget(host(const AdminThumbnail(
         imageUrl: '',
-        title: 'Untitled',
+        label: 'Untitled',
       )));
 
       expect(find.text('IMG'), findsOneWidget);
@@ -60,9 +60,9 @@ void main() {
 
     testWidgets('tapping opens a full-size view an admin can judge',
         (tester) async {
-      await tester.pumpWidget(host(const PromoThumbnail(
+      await tester.pumpWidget(host(const AdminThumbnail(
         imageUrl: 'https://example.com/deal.jpg',
-        title: '50% Off Crew Meals',
+        label: '50% Off Crew Meals',
       )));
 
       await tester.tap(find.byType(CachedFeedImage));
@@ -79,9 +79,9 @@ void main() {
 
     testWidgets('placeholder is not tappable — there is nothing to enlarge',
         (tester) async {
-      await tester.pumpWidget(host(const PromoThumbnail(
+      await tester.pumpWidget(host(const AdminThumbnail(
         imageUrl: null,
-        title: 'Untitled',
+        label: 'Untitled',
       )));
 
       expect(find.byType(InkWell), findsNothing);
