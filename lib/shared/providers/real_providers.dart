@@ -1120,12 +1120,17 @@ class PostProvider extends ChangeNotifier {
     if (isMock) return;
     if (_uid == null) return;
     final user = _auth.currentUser!;
+    // Denormalized author fields, same precedence as createPost: the app
+    // profile is the source of truth for name/photo, FirebaseAuth is the
+    // fallback. Without the photo the comment avatar is stuck on the initial.
+    final profile = _storedAuth?.currentUser;
     final ref = _db.collection('posts').doc(postId).collection('comments').doc();
     await ref.set({
       // postAuthorId denormalised so the post author can delete this comment
       // when they delete the post (H13, see firestore.rules).
       'postId': postId, 'authorId': _uid, 'postAuthorId': postAuthorId,
-      'authorName': user.displayName ?? 'User',
+      'authorName': profile?.name ?? user.displayName ?? 'User',
+      'authorPhotoUrl': profile?.photoUrl ?? user.photoURL,
       'text': text, 'likeCount': 0, 'createdAt': FieldValue.serverTimestamp(),
     });
     await _db.collection('posts').doc(postId).update({'commentCount': FieldValue.increment(1)});
@@ -1416,9 +1421,14 @@ class PostProvider extends ChangeNotifier {
     }
     if (_uid == null) return;
     final user = _auth.currentUser!;
+    // Denormalized author fields: prefer the app profile (UserModel), which is the
+    // source of truth for name/photo, and fall back to the FirebaseAuth user.
+    final profile = _storedAuth?.currentUser;
     final ref = _db.collection('posts').doc();
     final post = PostModel(
-      id: ref.id, authorId: _uid!, authorName: user.displayName ?? 'User',
+      id: ref.id, authorId: _uid!,
+      authorName: profile?.name ?? user.displayName ?? 'User',
+      authorPhotoUrl: profile?.photoUrl ?? user.photoURL,
       caption: caption, mediaUrls: mediaUrls, mediaType: mediaType,
       thumbnailUrl: thumbnailUrl, aspectRatio: aspectRatio, durationMs: durationMs,
       location: location, groupId: groupId, createdAt: DateTime.now(),
