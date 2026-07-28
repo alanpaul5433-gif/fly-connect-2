@@ -24,7 +24,7 @@ label claiming tracking, and no ATT prompt — so the submission fails.
 This is Apple's **resolution option 1**: the app does not track, so the label is what
 changes.
 
-### Code change made anyway (build 5)
+### Code change made anyway (build 6)
 
 Build 4 did link two advertising-related frameworks, pulled in transitively — nothing in
 `pubspec.yaml` requests advertising:
@@ -40,13 +40,13 @@ firebase_analytics
 `ios/Podfile` now sets `$FirebaseAnalyticsWithoutAdIdSupport = true`, which
 `firebase_analytics.podspec` reads to substitute
 `Firebase/AnalyticsWithoutAdIdSupport`. Verified against the resolved release link line
-(`Pods-Runner.release.xcconfig`) — both frameworks are gone. Build 5 has no ability to
+(`Pods-Runner.release.xcconfig`) — both frameworks are gone. Build 6 has no ability to
 read the advertising identifier at all, so "we do not track" is now enforced by the
 binary rather than asserted in a plist.
 
 Analytics and Crashlytics still function; only the ad-identity variant was dropped.
 
-### Binary verification (build 5, `flutter build ios --release`, 2026-07-28)
+### Binary verification (build 6, `flutter build ios --release`, 2026-07-28)
 
 Checked against the compiled `Runner.app`, not the build settings:
 
@@ -56,7 +56,7 @@ Checked against the compiled `Runner.app`, not the build settings:
 | IDFA / ATT API references | `strings -a Runner \| grep -iE 'ASIdentifierManager\|advertisingIdentifier\|ATTrackingManager'` | **no matches** |
 | Analytics still present | `strings -a Runner \| grep -E 'FIRAnalytics\|GoogleAppMeasurement'` | present — Analytics works |
 | ATT usage string | `PlistBuddy -c 'Print :NSUserTrackingUsageDescription'` | does not exist |
-| Version | `CFBundleShortVersionString` / `CFBundleVersion` | 1.0.0 / 5 |
+| Version | `CFBundleShortVersionString` / `CFBundleVersion` | 1.0.0 / 6 |
 
 `AdSupport.framework` is the only way to reach `ASIdentifierManager.advertisingIdentifier`.
 A binary that does not link it **cannot** read the IDFA under any runtime condition. This
@@ -80,7 +80,7 @@ the other:
 | `google_analytics_adid_collection_enabled`, `..._allow_ad_personalization_signals`, `..._allow_ad_user_data` = `false` | Analytics data being **shared onward** to Google Ads for personalization and audiences | `AndroidManifest.xml` |
 
 The permission removal was already in place; the three meta-data flags default to `true`
-and were added in build 5. Without them the app fed Google Ads personalization signals —
+and were added in build 6. Without them the app fed Google Ads personalization signals —
 "linking data with third-party data for advertising" in Apple's own definition — while
 the notes claimed otherwise.
 
@@ -109,7 +109,7 @@ Functionality, **not** used for tracking.
 
 When every "Used to Track You" box is cleared, App Store Connect stops requiring an ATT
 declaration and the 5.1.2(i) issue is resolved. **Save the label before uploading
-build 5.**
+build 6.**
 
 ---
 
@@ -128,7 +128,7 @@ Not iPad-specific. It failed on every iOS device; the reviewer's iPad is inciden
 is also not a Firebase console misconfiguration — the Services ID, key and bundle ID
 were all correct, which is why the error message is misleading.
 
-### Fix (build 5)
+### Fix (build 6)
 
 ```dart
 final oauthCredential = OAuthProvider('apple.com').credential(
@@ -188,5 +188,5 @@ Paste into App Store Connect → Version Information → Notes for Review:
 - [ ] `flutter test` green
 - [ ] Sign in with Apple manually verified on a physical iPad, both email options
 - [ ] Sign in with Apple manually verified on iPhone
-- [ ] Build number is 1.0.0 (5)
+- [ ] Build number is 1.0.0 (6)
 - [ ] Review Notes pasted into the submission
